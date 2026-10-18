@@ -20,7 +20,7 @@ jobs:
       attestations: write  # GitHub artifact attestations (provenance)
 
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4.1.0
@@ -36,7 +36,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.IMAGE_NAME }}
           flavor: |
@@ -47,7 +47,7 @@ jobs:
             type=semver,pattern={{major}}
 
       - name: Build image for scanning (amd64)
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: ai_gateway/Dockerfile
@@ -59,7 +59,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Trivy image scan (CRITICAL/HIGH CVEs — blocks push on findings)
-        uses: aquasecurity/trivy-action@bfa4b33a029b9aa80ddb784b45574c30e072c59e # master
+        uses: aquasecurity/trivy-action@6abccf398f78b4c337599c0656f933d91efb91a0 # master
         with:
           scan-type: image
           image-ref: ${{ env.IMAGE_NAME }}:scan
@@ -72,7 +72,7 @@ jobs:
       # second single-platform build under the QEMU set up above, loaded and
       # scanned before anything is pushed.
       - name: Build image for scanning (arm64)
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: ai_gateway/Dockerfile
@@ -84,7 +84,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Trivy image scan arm64 (CRITICAL/HIGH CVEs — blocks push on findings)
-        uses: aquasecurity/trivy-action@bfa4b33a029b9aa80ddb784b45574c30e072c59e # master
+        uses: aquasecurity/trivy-action@6abccf398f78b4c337599c0656f933d91efb91a0 # master
         with:
           scan-type: image
           image-ref: ${{ env.IMAGE_NAME }}:scan-arm64
@@ -94,7 +94,7 @@ jobs:
           format: table
 
       - name: Trivy image scan (JSON — attach to release)
-        uses: aquasecurity/trivy-action@bfa4b33a029b9aa80ddb784b45574c30e072c59e # master
+        uses: aquasecurity/trivy-action@6abccf398f78b4c337599c0656f933d91efb91a0 # master
         with:
           scan-type: image
           image-ref: ${{ env.IMAGE_NAME }}:scan
@@ -114,7 +114,7 @@ jobs:
 
       - name: Build and push (multi-arch)
         id: build-push
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: ai_gateway/Dockerfile
