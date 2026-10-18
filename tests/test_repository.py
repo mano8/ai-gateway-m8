@@ -52,7 +52,8 @@ def test_only_ai_migrate_upgrades_and_it_never_autogenerates() -> None:
 def test_the_dockerfile_never_migrates_and_drops_root() -> None:
     dockerfile = (PACKAGE / "Dockerfile").read_text(encoding="utf-8")
     assert "upgrade head" not in dockerfile
-    assert "USER appuser" in dockerfile
+    assert "useradd --uid 1000 --gid appuser" in dockerfile
+    assert "\nUSER 1000:1000\n" in dockerfile
     assert "python -m pip uninstall -y pip" in dockerfile
     digests = re.findall(
         r"^FROM python:3\.14-slim@sha256:([0-9a-f]{64})", dockerfile, re.M

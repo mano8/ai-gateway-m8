@@ -77,7 +77,9 @@ COPY --chown=appuser:appuser ./ai_gateway ./ai_gateway
 RUN find /opt/ai_gateway/scripts -name "*.sh" -exec sed -i 's/\r$//' {} + && \
     chmod +x /opt/ai_gateway/scripts/*.sh
 
-USER appuser
+# Numeric UID:GID of appuser (created above), so the host and any runtime can
+# resolve it without the image's /etc/passwd (hadolint DL3066).
+USER 1000:1000
 
 EXPOSE 8000
 
