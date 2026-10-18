@@ -24,7 +24,7 @@ jobs:
           python-version: "3.14"
 
       - name: Install lint tools
-        run: pip install ruff==0.15.18
+        run: pip install ruff==0.17.0
 
       - name: Check formatting
         run: ruff format --check .
@@ -131,7 +131,7 @@ jobs:
       - name: Add test tooling without moving the shipped set
         run: |
           pip freeze > lock-constraints.txt
-          pip install -c lock-constraints.txt pytest pytest-cov coverage ruff==0.15.18
+          pip install -c lock-constraints.txt pytest pytest-cov coverage ruff==0.17.0
           pip check
 
       - name: Run tests against the shipped set
