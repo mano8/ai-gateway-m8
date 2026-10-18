@@ -1,0 +1,17 @@
+-r requirements_base.txt
+
+# Testing
+pytest>=9.0.3
+pytest-cov>=7.1.0
+coverage>=7.14.1
+
+# Debugging
+debugpy>=1.8.20
+
+# Linting / formatting / security
+# ruff pinned exactly: an unpinned floor lets CI resolve whatever ruff
+# publishes that day, and a minor can widen the default rule set.
+ruff==0.15.18
+mypy>=2.1.0
+bandit>=1.9.4
+pip-audit>=2.7.3

@@ -1,0 +1,28 @@
+version: 2
+
+updates:
+  # GitHub Actions — keep workflow action SHAs current
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "ci"
+
+  # Python — ai_gateway dependencies
+  - package-ecosystem: "pip"
+    directory: "/ai_gateway"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "deps"
+
+  # Docker — both stages use python:3.14-slim. The fleet raises the base digest
+  # across every service image together, so a digest bump here is reviewed as
+  # one change across the service images, never merged alone.
+  - package-ecosystem: "docker"
+    directory: "/ai_gateway"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "deps"

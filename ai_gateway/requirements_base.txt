@@ -1,0 +1,19 @@
+# The gateway is PostgreSQL-only (its own ai_db), so fastapi-m8 is taken with
+# the db and postgres extras alone.
+#
+# fastapi-m8 floor: 4.5.1, the current release. The service-client guard and
+# the internal-header re-exports the gateway's execution routes need ship in a
+# later additive fastapi-m8 minor; the floor moves to it, with a narrow
+# `pip-compile --upgrade-package fastapi-m8` lock move, once it is published.
+fastapi-m8[db,postgres]>=4.5.1,<5.0.0
+uvicorn>=0.52.1
+
+alembic>=1.18.4
+
+pydantic>=2.13.4
+pydantic_settings>=2.14.2
+
+tenacity>=9.1.4
+
+# Optional observability (required when METRICS_ENABLED=true)
+prometheus-client>=0.25.0

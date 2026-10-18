@@ -1,0 +1,30 @@
+# Build context is the repository root; only ai_gateway/ is copied into the
+# image, and everything below stays out of the context.
+
+# ---- VCS, CI and docs --------------------------------------------------------
+.git/
+.github/
+*.md
+LICENSE
+
+# ---- tests and tooling -------------------------------------------------------
+tests/
+docker_compose/
+.venv/
+**/__pycache__/
+**/*.pyc
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+
+# ---- local env files and secrets ---------------------------------------------
+**/.env
+**/.env.*
+**/secrets/
+**/*.pem
+**/*.key
+
+# ---- local-only agent config -------------------------------------------------
+.claude/
