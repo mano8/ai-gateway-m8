@@ -11,7 +11,7 @@ debugpy>=1.8.20
 # Linting / formatting / security
 # ruff pinned exactly: an unpinned floor lets CI resolve whatever ruff
 # publishes that day, and a minor can widen the default rule set.
-ruff==0.15.18
+ruff==0.17.0
 mypy>=2.1.0
 bandit>=1.9.4
 pip-audit>=2.10.1
