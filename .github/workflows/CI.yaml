@@ -70,7 +70,7 @@ jobs:
         run: pip-audit --require-hashes --disable-pip -r ai_gateway/requirements_prod.lock
 
       - name: Trivy filesystem scan (CRITICAL/HIGH CVEs and secrets)
-        uses: aquasecurity/trivy-action@bfa4b33a029b9aa80ddb784b45574c30e072c59e # master
+        uses: aquasecurity/trivy-action@6abccf398f78b4c337599c0656f933d91efb91a0 # master
         with:
           scan-type: fs
           scan-ref: .
@@ -166,7 +166,7 @@ jobs:
           tags: ai-gateway-m8:ci-scan
 
       - name: Trivy image scan (CRITICAL/HIGH CVEs — blocks PR on findings)
-        uses: aquasecurity/trivy-action@bfa4b33a029b9aa80ddb784b45574c30e072c59e # master
+        uses: aquasecurity/trivy-action@6abccf398f78b4c337599c0656f933d91efb91a0 # master
         with:
           scan-type: image
           image-ref: ai-gateway-m8:ci-scan
