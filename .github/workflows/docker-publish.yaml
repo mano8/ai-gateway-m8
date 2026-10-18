@@ -59,7 +59,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Trivy image scan (CRITICAL/HIGH CVEs — blocks push on findings)
-        uses: aquasecurity/trivy-action@bfa4b33a029b9aa80ddb784b45574c30e072c59e # master
+        uses: aquasecurity/trivy-action@6abccf398f78b4c337599c0656f933d91efb91a0 # master
         with:
           scan-type: image
           image-ref: ${{ env.IMAGE_NAME }}:scan
@@ -84,7 +84,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Trivy image scan arm64 (CRITICAL/HIGH CVEs — blocks push on findings)
-        uses: aquasecurity/trivy-action@bfa4b33a029b9aa80ddb784b45574c30e072c59e # master
+        uses: aquasecurity/trivy-action@6abccf398f78b4c337599c0656f933d91efb91a0 # master
         with:
           scan-type: image
           image-ref: ${{ env.IMAGE_NAME }}:scan-arm64
@@ -94,7 +94,7 @@ jobs:
           format: table
 
       - name: Trivy image scan (JSON — attach to release)
-        uses: aquasecurity/trivy-action@bfa4b33a029b9aa80ddb784b45574c30e072c59e # master
+        uses: aquasecurity/trivy-action@6abccf398f78b4c337599c0656f933d91efb91a0 # master
         with:
           scan-type: image
           image-ref: ${{ env.IMAGE_NAME }}:scan
