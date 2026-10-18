@@ -1,0 +1,20 @@
+line-length = 88
+
+exclude = [
+    ".git",
+    "__pycache__",
+    "docker_compose",
+    "**/alembic/versions",
+]
+
+[lint]
+# The fleet's explicit rule set, plus TID251 for the import boundaries below.
+select = ["E4", "E7", "E9", "F", "TID251"]
+
+[lint.flake8-tidy-imports.banned-api]
+"auth_sdk_m8".msg = "auth-sdk-m8 must never be imported directly by service code. Use fastapi-m8's re-exports instead."
+"ai_gateway.db_models.credential_version".msg = "Credential versions hold envelope-encrypted key material: only ai_gateway/credentials/ may import this model."
+
+[lint.per-file-ignores]
+# The import boundaries apply to service code, not tests.
+"tests/**" = ["TID251"]

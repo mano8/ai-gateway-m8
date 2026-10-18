@@ -1,0 +1,20 @@
+[run]
+source = ai_gateway
+branch = True
+omit =
+    ; The fa-auth SSE bridge consumer: a live-stack surface by construction (it
+    ; holds an open event stream against a running issuer), so it has no unit
+    ; coverage rather than a mock that would prove nothing.
+    */ai_gateway/core/events.py
+    ; Migration environment: runs only under the ai-migrate one-shot against a
+    ; real database.
+    */ai_gateway/alembic/*
+
+[report]
+show_missing = True
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
+    raise NotImplementedError
+    @abstractmethod
+    if TYPE_CHECKING:

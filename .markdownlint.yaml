@@ -1,0 +1,26 @@
+---
+# markdownlint configuration, also consumed by Codacy's markdownlint engine when
+# the repository is set to use its own configuration files.
+#
+# Scope note: a config file supplies markdownlint's *defaults* for every rule it
+# does not mention, so this file restates the rule the fleet does not enforce
+# (MD013) alongside the one it adjusts (MD024).
+
+# MD024/no-duplicate-heading — restrict to sibling headings.
+#
+# CHANGELOG.md follows Keep a Changelog, where every release section repeats the
+# same subsection names (### Added / ### Changed / ### Fixed / ### Security …).
+# Under the default setting that makes each release after the first a stack of
+# duplicate-heading errors, purely as a function of how many releases the file
+# records. The duplication is the format, not a defect.
+#
+# siblings_only flags a duplicate only when it shares a parent heading, so
+# "### Changed" under two different `## [x.y.z]` releases both pass, while two
+# "### Changed" blocks inside one release — a real editing mistake — still fail.
+MD024:
+  siblings_only: true
+
+# MD013/line-length — off. Prose is wrapped for readability rather than to a
+# fixed column, and tables, URLs and code lines cannot be wrapped at all.
+# Python line length is enforced separately, by ruff.
+MD013: false

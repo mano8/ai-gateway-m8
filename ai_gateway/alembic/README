@@ -1,0 +1,2 @@
+ai_gateway migrations. Packaged with the image and applied only by the
+ai-migrate one-shot (scripts/ai_migrate.sh), as the schema-owner role.
