@@ -1,4 +1,5 @@
-"""Alembic environment for ai_gateway.
+"""
+Alembic environment for ai_gateway.
 
 Runs only under the ai-migrate one-shot. Handles offline and online modes
 against the gateway's own version table.
@@ -6,13 +7,13 @@ against the gateway's own version table.
 
 from __future__ import annotations
 
+from importlib import import_module
 from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 from sqlmodel import SQLModel
 
-import ai_gateway.db_models  # noqa: F401  (registers the tables)
 from ai_gateway.core.config import settings
 from ai_gateway.core.utc_session import pin_utc_session
 
@@ -21,6 +22,8 @@ config = context.config
 if config.config_file_name:
     fileConfig(config.config_file_name)
 
+# Importing the models package registers every table on SQLModel.metadata.
+import_module("ai_gateway.db_models")
 target_metadata = SQLModel.metadata
 
 VERSION_TABLE = config.get_main_option("version_table")
@@ -32,7 +35,7 @@ def get_url() -> str:
 
 
 def include_object(
-    object,  # noqa: A002
+    object_: object,
     name: str,
     type_: str,
     reflected: bool,

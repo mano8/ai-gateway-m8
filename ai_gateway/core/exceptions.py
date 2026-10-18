@@ -1,4 +1,5 @@
-"""Route-level exception-to-HTTP-response helper for this consumer.
+"""
+Route-level exception-to-HTTP-response helper for this consumer.
 
 Every route body funnels its ``except`` branch through
 :func:`handle_route_exception` rather than calling ``BaseController`` directly,
@@ -34,7 +35,8 @@ _OPAQUE_DETAIL = "An internal error occurred."
 
 
 class RedactedError(Exception):
-    """Stand-in rendered in place of an unrecognised exception.
+    """
+    Stand-in rendered in place of an unrecognised exception.
 
     Carries only the generic detail and the log reference, so the standard
     error envelope is built without the real exception ever reaching it.
@@ -57,19 +59,28 @@ def handle_route_exception(
     ex: Exception,
     session: Optional[Session] = None,
 ) -> JSONResponse:
-    """Map a caught exception to its response, redacting anything unrecognised.
+    """
+    Map a caught exception to its response, redacting anything unrecognised.
 
-    Args:
-        ex: The caught exception.
-        session: Optional session to roll back.
+    Parameters
+    ----------
+    ex
+        The caught exception.
+    session
+        Optional session to roll back.
 
-    Returns:
+    Returns
+    -------
+    JSONResponse
         The standard error envelope — rendered from the parsed fields of an
         integrity or validation error, and from an opaque stand-in for every
         other failure.
 
-    Raises:
-        HTTPException: Re-raised unchanged so its status code is preserved.
+    Raises
+    ------
+    HTTPException
+        Re-raised unchanged so its status code is preserved.
+
     """
     if isinstance(ex, HTTPException):
         raise ex

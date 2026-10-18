@@ -1,4 +1,5 @@
-"""Execution routes — provider calls authorized by a signed job context.
+"""
+Execution routes — provider calls authorized by a signed job context.
 
 The router is built by :func:`ai_gateway.core.execution_guard.build_execution_router`,
 so every route added here inherits the mandatory job-context dependency. No

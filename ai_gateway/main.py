@@ -1,4 +1,5 @@
-"""ai_gateway — ASGI entrypoint.
+"""
+ai_gateway — ASGI entrypoint.
 
 All wiring is handled by ``fastapi_m8.create_app``; this file only imports and
 connects: the domain router, the database health check, the optional metrics
@@ -38,10 +39,17 @@ async def check_db() -> HealthCheckResult:
         )
 
 
+def _metrics_response() -> Response:
+    """Render the Prometheus exposition."""
+    data, content_type = render_metrics()
+    return Response(content=data, media_type=content_type)
+
+
 def _register_metrics_endpoint(
     router: APIRouter, *, enabled: bool, credential: str | None = None
 ) -> None:
-    """Expose Prometheus metrics under the API prefix when enabled.
+    """
+    Expose Prometheus metrics under the API prefix when enabled.
 
     When ``credential`` is set, requests must present
     ``Authorization: Bearer <credential>`` (constant-time match) or receive
@@ -52,11 +60,13 @@ def _register_metrics_endpoint(
         return
 
     guard = make_scrape_credential_guard(credential)
-
-    @router.get("/metrics", include_in_schema=False, dependencies=[Depends(guard)])
-    def metrics_endpoint() -> Response:
-        data, content_type = render_metrics()
-        return Response(content=data, media_type=content_type)
+    router.add_api_route(
+        "/metrics",
+        _metrics_response,
+        methods=["GET"],
+        include_in_schema=False,
+        dependencies=[Depends(guard)],
+    )
 
 
 api_router = APIRouter(prefix=settings.API_PREFIX)

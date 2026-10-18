@@ -1,4 +1,5 @@
-"""Scheduler run-mode entrypoint.
+"""
+Scheduler run-mode entrypoint.
 
 The scheduler owns the gateway's background jobs (sweeps, reconciliation,
 retention). None is implemented yet, so this entrypoint refuses to run rather
@@ -16,10 +17,14 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> int:
-    """Refuse to start: no scheduler job exists yet.
+    """
+    Refuse to start: no scheduler job exists yet.
 
-    Returns:
+    Returns
+    -------
+    int
         Exit status ``1``.
+
     """
     logger.error("ai_gateway scheduler: no job is implemented yet; refusing to run")
     return 1

@@ -19,7 +19,7 @@ COPY ./ai_gateway/requirements_prod.lock .
 # Development builds keep the unpinned floors. Regenerate the lock with:
 #   pip-compile --generate-hashes --no-emit-index-url --no-strip-extras \
 #     --output-file=requirements_prod.lock requirements_prod.txt
-RUN pip install --upgrade "pip==26.1.1" && \
+RUN pip install --no-cache-dir --upgrade "pip==26.1.1" && \
     if [ "$ENVIRONMENT" = "development" ]; then \
         pip install --prefix=/install --no-cache-dir -r requirements_base.txt && \
         pip install --prefix=/install --no-cache-dir -r requirements_dev.txt ; \

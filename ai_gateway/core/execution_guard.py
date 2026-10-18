@@ -1,4 +1,5 @@
-"""The mandatory dependency of every execution route.
+"""
+The mandatory dependency of every execution route.
 
 An execution route authorizes a provider call from a signed job context
 presented by an authenticated service client — never from a user JWT. Every
@@ -28,14 +29,20 @@ CONTEXT_INVALID = "context_invalid"
 
 
 def require_job_context(request: Request) -> None:
-    """Refuse the request: no job context can be verified yet.
+    """
+    Refuse the request: no job context can be verified yet.
 
-    Args:
-        request: The incoming request. Only its job-context header would be
-            consulted; the ``Authorization`` header is never read here.
+    Parameters
+    ----------
+    request
+        The incoming request. Only its job-context header would be consulted;
+        the ``Authorization`` header is never read here.
 
-    Raises:
-        HTTPException: Always ``401`` with the ``context_invalid`` code.
+    Raises
+    ------
+    HTTPException
+        Always ``401`` with the ``context_invalid`` code.
+
     """
     del request
     raise HTTPException(
@@ -45,18 +52,26 @@ def require_job_context(request: Request) -> None:
 
 
 def build_execution_router(**kwargs: Any) -> APIRouter:
-    """Return a router whose every route depends on :func:`require_job_context`.
+    """
+    Return a router whose every route depends on :func:`require_job_context`.
 
-    Args:
-        **kwargs: Forwarded to :class:`fastapi.APIRouter`, except
-            ``dependencies``, which this factory owns.
+    Parameters
+    ----------
+    **kwargs
+        Forwarded to :class:`fastapi.APIRouter`, except ``dependencies``, which
+        this factory owns.
 
-    Returns:
+    Returns
+    -------
+    APIRouter
         The guarded router.
 
-    Raises:
-        TypeError: If ``dependencies`` is passed, since the guard must not be
-            replaced or reordered by a caller.
+    Raises
+    ------
+    TypeError
+        If ``dependencies`` is passed, since the guard must not be replaced or
+        reordered by a caller.
+
     """
     if "dependencies" in kwargs:
         raise TypeError("execution routers own their dependencies")

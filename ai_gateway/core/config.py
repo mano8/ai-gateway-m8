@@ -1,4 +1,5 @@
-"""Service settings for ai_gateway.
+"""
+Service settings for ai_gateway.
 
 Extends ``ConsumerServiceSettings`` with the gateway's own fields only.
 ``ConsumerAuthMixin``, ``ObservabilitySettingsMixin`` and ``CommonSettings``
@@ -27,7 +28,8 @@ from .. import __version__
 
 
 class Settings(ConsumerServiceSettings):
-    """ai_gateway settings — inherits every consumer field from fastapi-m8.
+    """
+    ai_gateway settings — inherits every consumer field from fastapi-m8.
 
     ``SERVICE_VERSION`` re-surfaces the package ``__version__``; the contract
     axis is versioned separately (``CONTRACT_VERSION``) and served at

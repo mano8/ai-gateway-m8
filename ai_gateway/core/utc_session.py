@@ -1,4 +1,5 @@
-"""Pin every PostgreSQL session this service opens to UTC.
+"""
+Pin every PostgreSQL session this service opens to UTC.
 
 sqlmodel maps a plain ``datetime`` field to ``UTCDateTime``, which binds an
 *aware* UTC value, and PostgreSQL casts an aware value into a ``timestamp

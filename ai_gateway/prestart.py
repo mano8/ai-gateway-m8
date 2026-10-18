@@ -1,4 +1,5 @@
-"""Pre-start checks for the web and scheduler run-modes.
+"""
+Pre-start checks for the web and scheduler run-modes.
 
 Two checks, in order, and nothing else:
 
@@ -22,7 +23,7 @@ from pathlib import Path
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import Engine, inspect, text
+from sqlalchemy import Engine, column, inspect, select, table, text
 from tenacity import after_log, before_log, retry, stop_after_attempt, wait_fixed
 
 logger = logging.getLogger(__name__)
@@ -37,16 +38,24 @@ ALEMBIC_INI = Path(__file__).resolve().parent / "alembic.ini"
 
 
 def packaged_head(ini_path: Path = ALEMBIC_INI) -> str | None:
-    """Return the single head revision packaged with this image, if any.
+    """
+    Return the single head revision packaged with this image, if any.
 
-    Args:
-        ini_path: The Alembic configuration shipped in the package.
+    Parameters
+    ----------
+    ini_path
+        The Alembic configuration shipped in the package.
 
-    Returns:
+    Returns
+    -------
+    str or None
         The head revision id, or ``None`` when no migration is packaged.
 
-    Raises:
-        RuntimeError: If the packaged scripts have more than one head.
+    Raises
+    ------
+    RuntimeError
+        If the packaged scripts have more than one head.
+
     """
     config = Config(str(ini_path))
     heads = ScriptDirectory.from_config(config).get_heads()
@@ -56,38 +65,52 @@ def packaged_head(ini_path: Path = ALEMBIC_INI) -> str | None:
 
 
 def database_revision(engine: Engine) -> str | None:
-    """Read the database's recorded revision without writing anything.
+    """
+    Read the database's recorded revision without writing anything.
 
-    Args:
-        engine: The service engine (runtime role).
+    Parameters
+    ----------
+    engine
+        The service engine (runtime role).
 
-    Returns:
+    Returns
+    -------
+    str or None
         The single recorded revision, or ``None`` when the version table is
         absent or empty.
 
-    Raises:
-        RuntimeError: If the version table holds more than one row.
+    Raises
+    ------
+    RuntimeError
+        If the version table holds more than one row.
+
     """
     with engine.connect() as connection:
         if not inspect(connection).has_table(VERSION_TABLE):
             return None
-        rows = connection.execute(
-            text(f"SELECT version_num FROM {VERSION_TABLE}")  # nosec B608
-        ).all()
+        version_table = table(VERSION_TABLE, column("version_num"))
+        rows = connection.execute(select(version_table.c.version_num)).all()
     if len(rows) > 1:
         raise RuntimeError(f"{VERSION_TABLE} holds more than one revision")
     return rows[0][0] if rows else None
 
 
 def check_schema_revision(engine: Engine, head: str | None) -> bool:
-    """Return whether the database revision equals the packaged head.
+    """
+    Return whether the database revision equals the packaged head.
 
-    Args:
-        engine: The service engine.
-        head: The packaged head, from :func:`packaged_head`.
+    Parameters
+    ----------
+    engine
+        The service engine.
+    head
+        The packaged head, from :func:`packaged_head`.
 
-    Returns:
+    Returns
+    -------
+    bool
         ``True`` only on an exact match (both absent counts as a match).
+
     """
     current = database_revision(engine)
     if current != head:
@@ -115,11 +138,15 @@ def wait_for_db(engine: Engine) -> None:
 
 
 def main() -> int:
-    """Run both checks against the service engine.
+    """
+    Run both checks against the service engine.
 
-    Returns:
+    Returns
+    -------
+    int
         The process exit status: ``0`` when the service may start, ``1``
         otherwise.
+
     """
     from ai_gateway.core.deps import engine  # noqa: PLC0415
 

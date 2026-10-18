@@ -1,4 +1,5 @@
-"""Build-once site for auth and database dependencies.
+"""
+Build-once site for auth and database dependencies.
 
 Import ``auth``, ``engine``, the tier dependencies and ``SessionDep`` from here.
 Never call ``build_auth_deps`` or ``create_db_engine`` a second time.
