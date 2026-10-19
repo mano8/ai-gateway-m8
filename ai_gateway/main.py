@@ -29,6 +29,7 @@ from .core.errors import GatewayError, gateway_error_handler
 from .core.events import make_lifespan_extras
 from .core.meta import install_gateway_meta
 from .core.spool_check import assert_local_spool
+from .installation import check_installation
 
 
 async def check_db() -> HealthCheckResult:
@@ -47,6 +48,11 @@ async def check_spool_filesystem() -> None:
     """Start-up assertion: the OCR spool, when configured, is local (D-45)."""
     if settings.AI_OCR_SPOOL_DIR is not None:
         assert_local_spool(settings.AI_OCR_SPOOL_DIR)
+
+
+async def check_installation_identity() -> None:
+    """Start-up assertion: the database records this installation (C-14)."""
+    check_installation(engine._engine, settings.AI_DEPLOYMENT_ID)
 
 
 def _metrics_response() -> Response:
@@ -104,7 +110,7 @@ def build_app(app_settings: Settings) -> FastAPI:
             auth_deps=auth,
             db_engine=engine,
             lifespan_extras=make_lifespan_extras(app_settings, auth),
-            startup_validators=[check_spool_filesystem],
+            startup_validators=[check_spool_filesystem, check_installation_identity],
             configure=configure,
         ),
     )

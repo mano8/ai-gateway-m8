@@ -7,7 +7,9 @@ The checks, in order, and nothing else:
    exclude (D-45);
 2. wait until the database answers a trivial ``SELECT``;
 3. read ``alembic_version_ai`` (read-only, as the runtime role) and exit
-   unless it equals the head packaged in this image.
+   unless it equals the head packaged in this image;
+4. exit unless the database records this ``AI_DEPLOYMENT_ID`` as its
+   installation.
 
 The run-modes never execute Alembic: no ``upgrade``, no autogenerate, no DDL.
 Migrations run only through the ``ai-migrate`` one-shot
@@ -163,8 +165,20 @@ def main() -> int:
         except SpoolFilesystemError as exc:
             logger.error("spool check failed: %s", exc)
             return 1
+    from ai_gateway.installation import (  # noqa: PLC0415
+        InstallationError,
+        check_installation,
+    )
+
     wait_for_db(engine._engine)
-    return 0 if check_schema_revision(engine._engine, packaged_head()) else 1
+    if not check_schema_revision(engine._engine, packaged_head()):
+        return 1
+    try:
+        check_installation(engine._engine, settings.AI_DEPLOYMENT_ID)
+    except InstallationError as exc:
+        logger.error("%s", exc)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":  # pragma: no cover

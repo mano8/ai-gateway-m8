@@ -20,18 +20,27 @@ from ai_gateway.core.utc_session import pin_utc_session
 config = context.config
 
 if config.config_file_name:
-    fileConfig(config.config_file_name)
+    # Keep the service loggers alive when Alembic runs in-process.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Importing the models package registers every table on SQLModel.metadata.
 import_module("ai_gateway.db_models")
+import_module("ai_gateway.credentials")
 target_metadata = SQLModel.metadata
 
 VERSION_TABLE = config.get_main_option("version_table")
 
 
 def get_url() -> str:
-    """Return the database URL from settings."""
-    return str(settings.SQLALCHEMY_DATABASE_URI)
+    """
+    Return the database URL.
+
+    An explicit ``sqlalchemy.url`` main option wins (tests run Alembic as the
+    owner role against a throwaway database); otherwise the settings URL,
+    which ``ai-migrate`` runs with the owner role's credentials.
+    """
+    explicit = config.get_main_option("sqlalchemy.url")
+    return explicit or str(settings.SQLALCHEMY_DATABASE_URI)
 
 
 def include_object(

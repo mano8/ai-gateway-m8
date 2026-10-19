@@ -13,6 +13,7 @@ written to a private temporary directory, mode 0600, before the import.
 from __future__ import annotations
 
 import atexit
+from collections.abc import Iterator
 import os
 import secrets
 import shutil
@@ -147,5 +148,16 @@ import pytest  # noqa: E402
 
 @pytest.fixture(scope="session", autouse=True)
 def _postgres() -> None:
-    """Create the roles and a fresh test database once per session."""
+    """Create the roles, a fresh test database, the schema and the installation."""
+    from ai_gateway.core.config import settings
+
     pg.bootstrap_database()
+    pg.migrate_and_install(settings.AI_DEPLOYMENT_ID, settings.AI_OCR_SPOOL_MAX_BYTES)
+
+
+@pytest.fixture
+def clean_db() -> Iterator[None]:
+    """Empty every data table before and after the test."""
+    pg.truncate_all()
+    yield
+    pg.truncate_all()

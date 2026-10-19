@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from pathlib import Path
 
 import pytest
@@ -65,8 +66,8 @@ def _ini(tmp_path: Path, *revisions: tuple[str, str | None]) -> Path:
     return ini
 
 
-def test_the_packaged_scripts_have_no_head_yet() -> None:
-    assert prestart.packaged_head() is None
+def test_the_packaged_head_is_the_initial_schema() -> None:
+    assert prestart.packaged_head() == "0001_initial"
 
 
 def test_the_packaged_version_table_is_the_gateways_own() -> None:
@@ -123,9 +124,30 @@ def test_main_exits_on_a_mismatched_database(
     assert "ai-migrate" in caplog.text
 
 
-def test_main_passes_on_a_matching_database(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(deps.engine, "_engine", _engine())
+def test_main_passes_on_the_migrated_database() -> None:
     assert prestart.main() == 0
+
+
+def test_main_exits_on_another_installation(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from ai_gateway.core.config import settings
+
+    monkeypatch.setattr(settings, "AI_DEPLOYMENT_ID", uuid.uuid4())
+    with caplog.at_level(logging.ERROR):
+        assert prestart.main() == 1
+    assert "AI_DEPLOYMENT_ID differs" in caplog.text
+
+
+def test_main_exits_without_an_installation(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from ai_gateway import installation
+
+    monkeypatch.setattr(installation, "recorded_deployment_id", lambda _engine: None)
+    with caplog.at_level(logging.ERROR):
+        assert prestart.main() == 1
+    assert "records no installation" in caplog.text
 
 
 def test_the_revision_check_writes_nothing() -> None:
