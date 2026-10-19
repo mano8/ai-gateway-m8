@@ -28,6 +28,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   id and `Retry-After`.
 - Start-up refusal of an OCR spool that is not on a local filesystem or whose
   locks do not exclude another process.
+- The initial schema (`T16`, revision `0001_initial`): installation identity,
+  restore state, scheduler lease and epoch sequence; providers, models,
+  profiles with immutable revisions and bindings (`NULLS NOT DISTINCT` per
+  scope); credentials and their versions; job-context redemption, usage, rate
+  windows, client occupancy and spool capacity; executions; remote
+  artifacts; credential and admin audit trails. Triggers enforce the D-24
+  and D-43 transition tables, frozen endpoints and model identities,
+  credential ownership, monotonic version numbers, set-once lifecycle stamps
+  and the material-destruction preconditions; the runtime role gets DML only
+  (audit insert/read only, installation read only).
+- `python -m ai_gateway.installation init`, run by `ai-migrate`, records the
+  installation id once; web and scheduler refuse to start against another id
+  or none.
 
 ### Changed
 

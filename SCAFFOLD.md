@@ -40,7 +40,7 @@ are relative to this repository.
 | `app/deps.py` | `ai_gateway/app/deps.py` | tier re-exports plus `require_job_context`; no API-key or owner-verifier export |
 | `app/routes/__init__.py` | `ai_gateway/app/routes/__init__.py` | docstring |
 | `controllers/__init__.py` | `ai_gateway/controllers/__init__.py` | docstring |
-| `db_models/__init__.py` | `ai_gateway/db_models/__init__.py` | no table yet |
+| `db_models/__init__.py` | `ai_gateway/db_models/__init__.py` | the gateway's own tables (`T16`) |
 | `schemas/__init__.py` | `ai_gateway/schemas/__init__.py` | docstring |
 | `alembic.ini` | `ai_gateway/alembic.ini` | `%(here)s`-relative packaged `alembic/versions`, `version_table = alembic_version_ai` |
 | `alembic/env.py` | `ai_gateway/alembic/env.py` | same offline/online flow and UTC pin; packaged version location |

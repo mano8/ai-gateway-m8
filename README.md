@@ -30,7 +30,16 @@ fleet's services.
   mandatory guard, and a user JWT is never sufficient there. No route accepts
   an API-key principal.
 - **Own database.** PostgreSQL `ai_db` with its own `alembic_version_ai`
-  table. Migrations are packaged with the image.
+  table. Migrations are packaged with the image. Two roles: `ai_owner` owns
+  the schema and is used only by `ai-migrate`; `ai_runtime` (web and
+  scheduler) has DML on the operational tables, `INSERT`/`SELECT` only on the
+  audit tables, `SELECT` only on the installation row, and no DDL. The schema
+  enforces the invariants itself: the D-24 execution and D-43 remote-artifact
+  transition tables, endpoint and model identity frozen at first use,
+  immutable profile revisions, credential ownership fixed at creation,
+  version numbers never reused, a deferred check that an active credential
+  points at committed live material, and material that cannot be destroyed
+  while a provider file or a sweep obligation needs it.
 
 ## Run-modes
 
@@ -40,11 +49,15 @@ One image, three commands:
 | --- | --- | --- |
 | `ai_gateway/scripts/docker_start.sh` (default `CMD`) | web | never |
 | `ai_gateway/scripts/scheduler_start.sh` | scheduler | never |
-| `ai_gateway/scripts/ai_migrate.sh` | `ai-migrate` one-shot, schema-owner role | the only one |
+| `ai_gateway/scripts/ai_migrate.sh` | `ai-migrate` one-shot, schema-owner role: `alembic upgrade head`, then records the installation (`python -m ai_gateway.installation init`) | the only one |
 
 The web and scheduler run-modes wait for the database, then read
 `alembic_version_ai` and exit unless it equals the head packaged in the image
-(`python -m ai_gateway.prestart`). Run `ai-migrate` first after every upgrade.
+(`python -m ai_gateway.prestart`), and exit unless the database records
+this `AI_DEPLOYMENT_ID` as its installation. Run `ai-migrate` first after
+every upgrade. The migration grants privileges to the runtime role
+`ai_runtime` (override with `alembic -x runtime_role=<name>`), which the
+database bootstrap must create beforehand.
 The image runs as `appuser`, carries no pip, and supports a read-only root
 filesystem.
 
