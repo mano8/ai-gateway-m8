@@ -38,6 +38,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   credential ownership, monotonic version numbers, set-once lifecycle stamps
   and the material-destruction preconditions; the runtime role gets DML only
   (audit insert/read only, installation read only).
+- Provider destination guard (`T19`, `ai_gateway/core/ssrf.py`): a static
+  write-time pass and a resolved call-time pass over every A/AAAA answer,
+  with the D-20 precedence (always-blocked classes before the allowlist,
+  `is_global` for external providers, IPv4-mapped normalisation, local
+  exemptions scoped to an allowlisted name and port, HTTPS for external
+  providers under production, port allowlist, no userinfo, IDNA compare).
 - `python -m ai_gateway.installation init`, run by `ai-migrate`, records the
   installation id once; web and scheduler refuse to start against another id
   or none.

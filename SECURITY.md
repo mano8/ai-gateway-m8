@@ -46,6 +46,28 @@ and the data each provider call discloses.
 
 ### Server-side request forgery and outbound egress
 
+A provider's `base_url` is checked when it is written and again, with every
+DNS answer, before each call (`ai_gateway/core/ssrf.py`):
+
+- loopback, link-local (including `169.254.169.254`), multicast, reserved and
+  unspecified addresses are refused for every provider, before any allowlist;
+  IPv4-mapped IPv6 is normalised first;
+- an `external` provider needs globally routable answers only (RFC 1918, ULA
+  and CGNAT are refused), port 443 or a listed port, and HTTPS under
+  production/strict;
+- a `local` provider needs an allowlisted `name:port` pair
+  (`AI_PROVIDER_ALLOWED_INTERNAL_HOSTS`); only that pair is exempt from the
+  private-address rule;
+- userinfo, query and fragment are refused; names are compared after IDNA
+  normalisation.
+
+**DNS-rebinding residual (R-11).** The check and the connection resolve the
+name separately, so an answer that changes between them is not caught by the
+guard. TLS hostname verification on `external` providers mitigates it;
+closing it needs connect-time destination enforcement (an egress proxy), a
+named follow-on. These rules bind the gateway's own code only: code running
+inside a compromised gateway is not constrained by them.
+
 ### Prompt injection and untrusted provider output
 
 ### Denial of wallet and resource exhaustion
