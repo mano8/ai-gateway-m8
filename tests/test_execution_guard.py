@@ -14,6 +14,7 @@ from ai_gateway.core.execution_guard import (
     CONTEXT_INVALID,
     JOB_CONTEXT_HEADER,
     build_execution_router,
+    require_clock_within_bound,
     require_job_context,
 )
 from ai_gateway.core.config import settings
@@ -61,7 +62,7 @@ def test_the_guard_cannot_be_replaced() -> None:
 
 def test_the_shipped_execution_router_carries_the_guard() -> None:
     calls = [d.dependency for d in execution.router.dependencies]
-    assert calls == [require_job_context]
+    assert calls == [require_clock_within_bound, require_job_context]
 
 
 def test_every_gateway_execution_route_depends_on_the_guard() -> None:

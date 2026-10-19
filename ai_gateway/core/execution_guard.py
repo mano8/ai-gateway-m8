@@ -7,12 +7,16 @@ execution route is registered on a router built by :func:`build_execution_router
 which attaches :func:`require_job_context` to the whole router so no route can
 be added without it.
 
-Scaffold state: the job-context verifier and the service-client guard do not
-exist yet, so this dependency **fails closed** — every request is refused with
+Every execution route also refuses to run while the application and
+database clocks disagree by more than ``AI_MAX_CLOCK_SKEW_SECONDS``: every
+lease and deadline is a database-clock predicate, so a skewed process answers
+the typed ``503 clock_skew_exceeded`` instead (D-24).
+
+Current state: the job-context verifier does not exist yet, so
+:func:`require_job_context` **fails closed** — every request is refused with
 ``401 context_invalid``, whatever it carries. It never reads the
 ``Authorization`` header, so a user JWT cannot reach an execution route. The
-verifying implementation replaces the body of :func:`require_job_context`; the
-router factory and the refusal shape stay.
+verifying implementation replaces its body; the router factory stays.
 """
 
 from __future__ import annotations
@@ -51,9 +55,18 @@ def require_job_context(request: Request) -> None:
     )
 
 
+def require_clock_within_bound() -> None:
+    """Refuse execution while the clock skew exceeds its bound (D-24)."""
+    from ai_gateway.core.deps import clock  # noqa: PLC0415 - built once at import
+
+    clock.require_within_bound()
+
+
 def build_execution_router(**kwargs: Any) -> APIRouter:
     """
-    Return a router whose every route depends on :func:`require_job_context`.
+    Return a router whose every route runs the execution guards.
+
+    The clock-skew guard runs first, then :func:`require_job_context`.
 
     Parameters
     ----------
@@ -75,4 +88,10 @@ def build_execution_router(**kwargs: Any) -> APIRouter:
     """
     if "dependencies" in kwargs:
         raise TypeError("execution routers own their dependencies")
-    return APIRouter(dependencies=[Depends(require_job_context)], **kwargs)
+    return APIRouter(
+        dependencies=[
+            Depends(require_clock_within_bound),
+            Depends(require_job_context),
+        ],
+        **kwargs,
+    )

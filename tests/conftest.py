@@ -6,18 +6,42 @@ exist before the first ``ai_gateway`` import. Environment variables outrank any
 developer ``.env``, which keeps this suite identical locally and in CI (where no
 ``.env`` is checked in).
 
-Every value here is a throwaway placeholder. No test opens a socket to a real
-service; the only databases are in-memory SQLite surrogates.
+Every value here is a throwaway placeholder. The key files are random and
+written to a private temporary directory, mode 0600, before the import.
 """
 
 from __future__ import annotations
 
+import atexit
 import os
+import secrets
+import shutil
+import tempfile
 import uuid
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+#: Private directory for the test key files (removed at interpreter exit).
+KEY_DIR = Path(tempfile.mkdtemp(prefix="ai-gateway-test-keys-"))
+atexit.register(shutil.rmtree, KEY_DIR, ignore_errors=True)
+
+
+def write_key_file(name: str, content: bytes | None = None, mode: int = 0o600) -> Path:
+    """Write a key file under :data:`KEY_DIR` with ``mode``."""
+    path = KEY_DIR / name
+    path.write_bytes(secrets.token_bytes(32) if content is None else content)
+    path.chmod(mode)
+    return path
+
+
+import pg_harness as pg  # noqa: E402
+
+KEK_FILE = write_key_file("kek")
+FINGERPRINT_KEY_FILE = write_key_file("fingerprint")
+
 TEST_ISSUER = "https://auth.test.invalid"
+HEALTH_DETAIL = {"X-Internal-Token": "GatewayTests-Health-Detail-Credential-1"}
 TEST_AUDIENCE = "ai-gateway-tests"
 ACCESS_SECRET = "GatewayTests-AccessKey-ai8gw-Ab12Cd34"
 
@@ -33,11 +57,11 @@ TEST_ENV = {
     "AUTH_SERVICE_ROLE": "consumer",
     "AUTH_PREFIX": "/user",
     "SELECTED_DB": "Postgres",
-    "DB_HOST": "127.0.0.1",
-    "DB_PORT": "5432",
-    "DB_DATABASE": "ai_db",
-    "DB_USER": "ai_runtime_tests",
-    "DB_PASSWORD": "GatewayTests_Passw0rd",
+    "DB_HOST": pg.ADMIN_URL.host or "127.0.0.1",
+    "DB_PORT": str(pg.ADMIN_URL.port or 5432),
+    "DB_DATABASE": pg.DB_NAME,
+    "DB_USER": pg.RUNTIME,
+    "DB_PASSWORD": pg.RUNTIME_PASSWORD,
     "SECRET_KEY": "GatewayTests-SessionSecret-ai8gw-Ab1",
     "ACCESS_SECRET_KEY": ACCESS_SECRET,
     "REFRESH_SECRET_KEY": "GatewayTests-RefreshKey-ai8gw-Ab12Cd34",
@@ -50,10 +74,14 @@ TEST_ENV = {
     "TOKEN_AUDIENCE": TEST_AUDIENCE,
     "EVENT_SIGNING_ENABLED": "false",
     "METRICS_ENABLED": "false",
+    "HEALTH_DETAIL_CREDENTIAL": "GatewayTests-Health-Detail-Credential-1",
     # Gateway keys without a default.
     "AI_DEPLOYMENT_ID": "6f1c1a52-2b8e-4a0e-9a37-3f4b5c6d7e80",
     "AI_CREDENTIAL_STORAGE_BACKEND": "database",
-    "AI_SERVICE_CLIENTS": "[]",
+    "AI_CREDENTIAL_KEK_PROVIDER": "local",
+    "AI_CREDENTIAL_KEK_FILE": str(KEK_FILE),
+    "AI_CREDENTIAL_FINGERPRINT_KEY_FILE": str(FINGERPRINT_KEY_FILE),
+    "AI_SERVICE_CLIENTS": "{}",
     "AI_MAX_CREDENTIALS_PER_SCOPE": "10",
 }
 
@@ -112,3 +140,12 @@ def access_token(
 def bearer(role: str, **kwargs: Any) -> dict[str, str]:
     """Return an ``Authorization`` header carrying a token for *role*."""
     return {"Authorization": f"Bearer {access_token(role, **kwargs)}"}
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _postgres() -> None:
+    """Create the roles and a fresh test database once per session."""
+    pg.bootstrap_database()
