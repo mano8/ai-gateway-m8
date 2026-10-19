@@ -14,10 +14,10 @@ routes need its reader/writer/admin/superuser authentication.
 
 - `fastapi-m8[db,postgres]>=4.5.1,<5.0.0`. The lock is `fastapi-m8==4.5.1`
   and `auth-sdk-m8==3.2.0`, the current PyPI releases.
-- **Upgrade pending.** The service-client guard and the internal-header
-  re-exports the execution routes need ship in a later additive `fastapi-m8`
-  minor. Once it is published, the floor in `requirements_base.txt` moves to
-  it, with a narrow `pip-compile --upgrade-package fastapi-m8` lock move.
+- **Floor moved, lock pending.** `requirements_base.txt` now requires
+  `fastapi-m8>=4.6.0` (the service-client guard and the internal-header
+  re-exports) and `ai-sdk-m8[jobcontext]>=0.2.0`. The hash lock moves with a
+  narrow `pip-compile --upgrade-package` once both are on PyPI.
 
 ## File mapping
 

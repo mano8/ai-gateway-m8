@@ -11,10 +11,10 @@ fleet's services.
 - Image: `tepochtli/ai-gateway-m8`.
 - Licence: Apache-2.0 (`LICENSE`).
 
-> **Status: scaffold.** The application factory, settings, authentication
-> wiring, run-modes and CI are in place. No management or execution route, no
-> table and no scheduler job exists yet, and every execution request is refused
-> (`401 context_invalid`) until the job-context verifier lands.
+> **Status: foundation in progress.** The settings refuse every contradiction
+> at boot, `/meta` reports the gateway's ratified values, and `/health` checks
+> the database and the application–database clock skew. Every execution
+> request is still refused until the job-context verifier lands.
 
 ## Architecture
 
@@ -51,9 +51,44 @@ filesystem.
 ## Configuration
 
 Copy `ai_gateway/.env.example` to `ai_gateway/.env` and replace every
-`changethis`. Every gateway key (`AI_*`) is listed there; an unknown key and a
-missing required key both fail at startup. Secrets can be mounted as files
-(`<FIELD>_FILE=/run/secrets/<name>`).
+`changethis`, or delete a line to take the key's default. Every gateway key
+(`AI_*`) is listed there; an unknown key, a missing required key and a
+remaining placeholder all fail at startup. Secrets can be mounted as files
+(`<FIELD>_FILE=/run/secrets/<name>`); keys always are.
+
+The settings refuse to boot on any contradiction they can see:
+
+- a `vault` backend with a KEK setting; a `database` backend without a KEK
+  provider or a fingerprint key; a `local` KEK file that is unreadable, not
+  32 bytes, or readable by group or others; `vault_transit` or `vault`
+  without the address, auth method and auth files; a non-`https` Vault address
+  under `production`/strict;
+- the same key in two key files, or (under `production`/strict) the same
+  secret value for two purposes;
+- an `AI_SERVICE_CLIENTS` entry with a plaintext secret, an unknown scope,
+  `job-context:issue` without public keys, a key whose `kid` it does not
+  derive, or one key under two clients;
+- an `AI_DATA_CLASS_POLICY` that lets `restricted` reach an external provider
+  without the context's own BYOK credential;
+- `AI_USER_BYOK_ENABLED` unset under `production`/strict;
+  `API_KEY_INTROSPECTION_ENABLED=true`;
+- `ocr` enabled without a receipt key and a spool directory; a receipt `kid`
+  that differs from the seed's; an issuer key equal to the receipt key;
+- a dispatch-context TTL above the context TTL, a credential-resolve timeout
+  not below both the reservation and dispatch TTLs, or a skew bound above the
+  sweeper grace (30 s);
+- an internal host that is not a lower-case `name:port` pair.
+
+At start, the web and scheduler run-modes also refuse an OCR spool that is not
+on `ext4`, `xfs` or `btrfs` or whose locks do not exclude another process.
+
+`{API_PREFIX}/meta` serves the fleet `ServiceMeta` fields plus a `gateway`
+block: the installation id, `user_byok_enabled`, both context TTLs, the
+SHA-256 of the effective data-class policy, the enabled capabilities, the
+storage backend and this replica's key generations (truncated hashes, never
+key material). `/health` reports the database and the application–database
+clock skew; above `AI_MAX_CLOCK_SKEW_SECONDS` it is degraded and every
+execution answers `503 clock_skew_exceeded`.
 
 ## Development
 
@@ -67,8 +102,18 @@ pytest                      # branch coverage gate: 100%
 docker build -f ai_gateway/Dockerfile .
 ```
 
-The test suite needs no `.env` and no running service: `tests/conftest.py`
-sets a complete throwaway environment.
+The test suite needs no `.env`: `tests/conftest.py` sets a complete
+throwaway environment and writes random `0600` key files. It needs a
+PostgreSQL server, because the gateway's invariants live in the database:
+point `AI_GATEWAY_TEST_PG_ADMIN_URL` at a superuser connection (default
+`postgresql://postgres:postgres@127.0.0.1:5432/postgres`), and the harness
+creates the `ai_owner`/`ai_runtime` roles and a fresh test database. For
+example:
+
+```bash
+docker run -d --rm --name ai-gw-pg -p 5432:5432 \
+  -e POSTGRES_PASSWORD=postgres --tmpfs /var/lib/postgresql postgres:18-alpine
+```
 
 Regenerate the production lock with Python 3.14 on Linux, from PyPI only:
 

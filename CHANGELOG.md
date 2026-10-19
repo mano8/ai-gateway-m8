@@ -6,7 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-First version: `0.1.0`, dated when the human publishes the release.
+### Added
+
+- Settings (`T15`): every C-14 key typed, with defaults for the technical
+  bounds, and boot refusals for every contradiction the settings can see —
+  backend and KEK combinations, unsafe or reused key files, placeholders,
+  reused secrets under production, malformed service clients (plaintext
+  secrets, unknown scopes, issuers without keys, a `kid` its key does not
+  derive, a key under two clients), a policy that widens `restricted`, an
+  implicit `AI_USER_BYOK_ENABLED` under production, API-key introspection,
+  OCR without its receipt key and spool, receipt-key conflicts, TTL, timeout
+  and skew ordering, and malformed host or port lists. Keys are read once from
+  mode-checked files and never shown in `repr`. Boot errors list field names
+  and messages, never the input values.
+- `{API_PREFIX}/meta` is the fleet shape plus a `gateway` block (installation
+  id, user-BYOK flag, context TTLs, policy hash, capabilities, storage backend,
+  key generations).
+- `/health` checks the application–database clock skew; above the bound it is
+  degraded and execution routes answer the typed `503 clock_skew_exceeded`.
+- Typed `AiError` answers for execution-route refusals, with an opaque request
+  id and `Retry-After`.
+- Start-up refusal of an OCR spool that is not on a local filesystem or whose
+  locks do not exclude another process.
+
+### Changed
+
+- Requires `fastapi-m8>=4.6.0` and `ai-sdk-m8[jobcontext]>=0.2.0`.
+- The test suite runs against PostgreSQL (CI starts a service container).
+
+## [0.1.0] - 2026-10-18
 
 ### Added
 
