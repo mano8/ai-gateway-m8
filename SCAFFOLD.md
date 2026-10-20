@@ -12,12 +12,18 @@ routes need its reader/writer/admin/superuser authentication.
 
 ## Platform pin
 
-- `fastapi-m8[db,postgres]>=4.5.1,<5.0.0`. The lock is `fastapi-m8==4.5.1`
-  and `auth-sdk-m8==3.2.0`, the current PyPI releases.
-- **Floor moved, lock pending.** `requirements_base.txt` now requires
-  `fastapi-m8>=4.6.0` (the service-client guard and the internal-header
-  re-exports) and `ai-sdk-m8[jobcontext]>=0.2.0`. The hash lock moves with a
-  narrow `pip-compile --upgrade-package` once both are on PyPI.
+- `fastapi-m8[db,postgres]>=4.6.0,<5.0.0` and
+  `ai-sdk-m8[jobcontext]>=0.2.0,<0.3.0`. `fastapi-m8` 4.6.0 is the published
+  minor that adds the service-client guard and the internal-header re-exports.
+  `ai-sdk-m8` 0.2.0 carries the signed-object rule, the C-01 schemas and the
+  management wire models.
+- The lock pins `fastapi-m8==4.6.0`, `auth-sdk-m8==3.2.1` (the floor
+  `fastapi-m8` 4.6.0 requires) and `ai-sdk-m8==0.2.0`. All three are on PyPI.
+  The lock moved on 2026-10-20 with one narrow `pip-compile --upgrade-package`
+  for each of the three, under Python 3.14.7 in the Dockerfile's
+  `python:3.14-slim` digest with pip-tools 7.6.2. No other pin changed.
+- The scaffold's earlier pin, until 2026-10-20, was `fastapi-m8==4.5.1` and
+  `auth-sdk-m8==3.2.0`.
 
 ## File mapping
 

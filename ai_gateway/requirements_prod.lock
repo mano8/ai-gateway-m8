@@ -4,6 +4,10 @@
 #
 #    pip-compile --generate-hashes --no-emit-index-url --no-strip-extras --output-file=requirements_prod.lock requirements_prod.txt
 #
+ai-sdk-m8[jobcontext]==0.2.0 \
+    --hash=sha256:967f7431d46dbb1ea7f7ce6bae27125cf6765d0e529b81327c4096fdd4deec5b \
+    --hash=sha256:ad4222c0b687799b46eb8a18eaf8a679fb2f9a64199757f235d9a031acdb2dd7
+    # via -r requirements_base.txt
 alembic==1.20.0 \
     --hash=sha256:77eb101048d95f982c0353e9233404889dcd7a6fc244c107836c0e2fc9cf7d9d \
     --hash=sha256:db505480647bc60386c5369402f4a57a506b7539c9e9ef5e270d45cbbe4939bf
@@ -25,9 +29,9 @@ anyio==4.15.1 \
     #   fastapi-m8
     #   httpx
     #   starlette
-auth-sdk-m8[config,events,fastapi,observability,security]==3.2.0 \
-    --hash=sha256:198a542608dcfd57f755e1ffbbad5b1f1627f8445c7642b97376728b456dd98d \
-    --hash=sha256:be6a50649e5420e7f8d0c7ae9a36303c10648f162be25fbdf5cc6d27d3267c7f
+auth-sdk-m8[config,events,fastapi,observability,security]==3.2.1 \
+    --hash=sha256:3d1d7188f2cb1fc84c10fc475aaa13d0ffd0255ef2851a0f162cb591fcd1a257 \
+    --hash=sha256:beb6b184b559ee0823f70a873306af9ffd4a35c6e7c30a327f56e4b464661892
     # via fastapi-m8
 certifi==2026.7.22 \
     --hash=sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775 \
@@ -201,7 +205,9 @@ cryptography==50.0.2 \
     --hash=sha256:f9f6143a8c75945eb960d9eb98905a441394abfa24afaae239d514ffb2586480 \
     --hash=sha256:fa8f5efb344d6908a1ce62f4a24e2e5780f825d6f53f5f50ec5ffacac72936cb \
     --hash=sha256:fdd28f912fccfec1846a94e2e1e8f9b0012f557f0c46fe4f3eb0d7a87afcf90b
-    # via auth-sdk-m8
+    # via
+    #   ai-sdk-m8
+    #   auth-sdk-m8
 dnspython==2.9.0 \
     --hash=sha256:9a4aedb833c3c1b49214d04d44d3032ab7a9135f7c1d29a549b4ff78fd82fda9 \
     --hash=sha256:b44dc6b18f07a8b1c56676a19fbfdb5209415b046a9cece286baafa87ff3f7f1
@@ -216,9 +222,9 @@ fastapi==0.143.3 \
     # via
     #   auth-sdk-m8
     #   fastapi-m8
-fastapi-m8[db,postgres]==4.5.1 \
-    --hash=sha256:648b35dcdd35a72335fe00613a0f2748003b5be2487596f298a968ed174b4fdf \
-    --hash=sha256:e02b7cbe6d77158e24da880227a0b2a0c5c0a2b85bc98819e9f84c8c05574a8a
+fastapi-m8[db,postgres]==4.6.0 \
+    --hash=sha256:0e3dfb234b3ce1ebb9893cf046cb852432e6bc82b34bbb1d66ccb900159376b7 \
+    --hash=sha256:43211600b2b34882a949d744090d492cefc117913866192567e030ab452973aa
     # via -r requirements_base.txt
 gunicorn==26.2.0 \
     --hash=sha256:62b864895d9ebff0b2f9867ba04fe811c93121596540830c9c916d0769668447 \
@@ -238,6 +244,7 @@ httpx==0.28.1 \
     --hash=sha256:75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc \
     --hash=sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad
     # via
+    #   ai-sdk-m8
     #   auth-sdk-m8
     #   fastapi-m8
 idna==3.20 \
@@ -496,6 +503,7 @@ pydantic==2.14.1 \
     --hash=sha256:94f478203dd03404682a1ada216965651dd74b1d2d5ffd62e00e0837caab5c26
     # via
     #   -r requirements_base.txt
+    #   ai-sdk-m8
     #   auth-sdk-m8
     #   fastapi
     #   pydantic-settings

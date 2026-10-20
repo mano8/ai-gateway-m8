@@ -50,7 +50,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- Requires `fastapi-m8>=4.6.0` and `ai-sdk-m8[jobcontext]>=0.2.0`.
+- Requires `fastapi-m8>=4.6.0` and `ai-sdk-m8[jobcontext]>=0.2.0`. The
+  production lock pins `fastapi-m8` 4.6.0, `auth-sdk-m8` 3.2.1 and
+  `ai-sdk-m8[jobcontext]` 0.2.0; no other pin moved. Tests cover
+  `fastapi-m8`'s service-client guard over the gateway's `AI_SERVICE_CLIENTS`
+  registry, and check that the lock satisfies both floors.
 - The test suite runs against PostgreSQL (CI starts a service container).
 
 ## [0.1.0] - 2026-10-18
