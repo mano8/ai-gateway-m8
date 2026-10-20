@@ -76,6 +76,20 @@ class DataClassPolicy:
         return dict(self.allowed) == dict(DEFAULT_POLICY)
 
 
+def _destinations(name: str, values: object) -> frozenset[Destination]:
+    if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
+        raise PolicyConfigError(f"AI_DATA_CLASS_POLICY[{name}] must be a list")
+    try:
+        destinations = frozenset(Destination(v) for v in values)
+    except ValueError:
+        raise PolicyConfigError(
+            f"AI_DATA_CLASS_POLICY[{name}] names an unknown destination"
+        ) from None
+    if len(destinations) != len(values):
+        raise PolicyConfigError(f"AI_DATA_CLASS_POLICY[{name}] repeats a value")
+    return destinations
+
+
 def parse_data_class_policy(raw: str | None) -> DataClassPolicy:
     """
     Parse ``AI_DATA_CLASS_POLICY``; ``None`` yields the ratified default.
@@ -94,19 +108,10 @@ def parse_data_class_policy(raw: str | None) -> DataClassPolicy:
         raise PolicyConfigError(
             "AI_DATA_CLASS_POLICY must name exactly public, internal and restricted"
         )
-    allowed: dict[DataClass, frozenset[Destination]] = {}
-    for name, values in document.items():
-        if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
-            raise PolicyConfigError(f"AI_DATA_CLASS_POLICY[{name}] must be a list")
-        try:
-            destinations = frozenset(Destination(v) for v in values)
-        except ValueError:
-            raise PolicyConfigError(
-                f"AI_DATA_CLASS_POLICY[{name}] names an unknown destination"
-            ) from None
-        if len(destinations) != len(values):
-            raise PolicyConfigError(f"AI_DATA_CLASS_POLICY[{name}] repeats a value")
-        allowed[DataClass(name)] = destinations
+    allowed = {
+        DataClass(name): _destinations(name, values)
+        for name, values in document.items()
+    }
     if Destination.EXTERNAL_PLATFORM in allowed[DataClass.RESTRICTED]:
         raise PolicyConfigError(
             "AI_DATA_CLASS_POLICY may never let restricted data reach an external "

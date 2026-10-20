@@ -93,17 +93,22 @@ def _valid_port(text: str) -> int:
     return int(text)
 
 
-def _hostname_ok(name: str) -> bool:
-    labels = name.split(".")
-    return all(
+def _label_ok(label: str) -> bool:
+    return (
         0 < len(label) <= 63
         and label[0].isalnum()
         and label[-1].isalnum()
         and all(c.isalnum() or c == "-" for c in label)
         and label.isascii()
         and label == label.lower()
-        for label in labels
-    ) and not all(label.isdigit() for label in labels)
+    )
+
+
+def _hostname_ok(name: str) -> bool:
+    labels = name.split(".")
+    return all(_label_ok(label) for label in labels) and not all(
+        label.isdigit() for label in labels
+    )
 
 
 def _parse_internal_hosts(raw: str | None) -> frozenset[tuple[str, int]]:
@@ -485,43 +490,47 @@ class Settings(ConsumerServiceSettings):
     def _load_key_files(self) -> Settings:
         """Read every key file once; mode, length and reuse are checked."""
         try:
-            if (
-                self.AI_CREDENTIAL_KEK_PROVIDER == "local"
-                and self.AI_CREDENTIAL_KEK_FILE
-            ):
-                self._kek = load_key_file(
-                    self.AI_CREDENTIAL_KEK_FILE, what="the KEK file"
-                )
-                self._previous_keks = tuple(
-                    load_key_file(Path(p), what="a previous KEK file")
-                    for p in _split_list(self.AI_CREDENTIAL_KEK_PREVIOUS_FILES or "")
-                )
-            if self.AI_CREDENTIAL_FINGERPRINT_KEY_FILE:
-                self._fingerprint_key = load_key_file(
-                    self.AI_CREDENTIAL_FINGERPRINT_KEY_FILE,
-                    what="the fingerprint key file",
-                )
-            if self.AI_CREDENTIAL_FINGERPRINT_PREVIOUS_KEY_FILE:
-                self._previous_fingerprint_key = load_key_file(
-                    self.AI_CREDENTIAL_FINGERPRINT_PREVIOUS_KEY_FILE,
-                    what="the previous fingerprint key file",
-                )
-            if self.AI_EXECUTION_RECEIPT_KEY_FILE:
-                self._receipt_seed = load_key_file(
-                    self.AI_EXECUTION_RECEIPT_KEY_FILE, what="the receipt key file"
-                )
-            for name in (
-                "AI_VAULT_TOKEN_FILE",
-                "AI_VAULT_ROLE_ID_FILE",
-                "AI_VAULT_SECRET_ID_FILE",
-            ):
-                path = getattr(self, name)
-                if path is not None and self._uses_vault():
-                    load_secret_text(path, what=name)
+            self._load_kek_files()
+            self._load_fingerprint_and_receipt_keys()
+            self._check_vault_files()
         except KeyFileError as exc:
             raise ValueError(str(exc)) from None
         self._refuse_reused_keys()
         return self
+
+    def _load_kek_files(self) -> None:
+        if self.AI_CREDENTIAL_KEK_PROVIDER == "local" and self.AI_CREDENTIAL_KEK_FILE:
+            self._kek = load_key_file(self.AI_CREDENTIAL_KEK_FILE, what="the KEK file")
+            self._previous_keks = tuple(
+                load_key_file(Path(p), what="a previous KEK file")
+                for p in _split_list(self.AI_CREDENTIAL_KEK_PREVIOUS_FILES or "")
+            )
+
+    def _load_fingerprint_and_receipt_keys(self) -> None:
+        if self.AI_CREDENTIAL_FINGERPRINT_KEY_FILE:
+            self._fingerprint_key = load_key_file(
+                self.AI_CREDENTIAL_FINGERPRINT_KEY_FILE,
+                what="the fingerprint key file",
+            )
+        if self.AI_CREDENTIAL_FINGERPRINT_PREVIOUS_KEY_FILE:
+            self._previous_fingerprint_key = load_key_file(
+                self.AI_CREDENTIAL_FINGERPRINT_PREVIOUS_KEY_FILE,
+                what="the previous fingerprint key file",
+            )
+        if self.AI_EXECUTION_RECEIPT_KEY_FILE:
+            self._receipt_seed = load_key_file(
+                self.AI_EXECUTION_RECEIPT_KEY_FILE, what="the receipt key file"
+            )
+
+    def _check_vault_files(self) -> None:
+        for name in (
+            "AI_VAULT_TOKEN_FILE",
+            "AI_VAULT_ROLE_ID_FILE",
+            "AI_VAULT_SECRET_ID_FILE",
+        ):
+            path = getattr(self, name)
+            if path is not None and self._uses_vault():
+                load_secret_text(path, what=name)
 
     def _uses_vault(self) -> bool:
         return (

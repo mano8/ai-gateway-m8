@@ -37,7 +37,7 @@ import ipaddress
 import socket
 from collections.abc import Callable
 from dataclasses import dataclass
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit
 
 from ai_sdk_m8.schemas import ProviderBoundary
 
@@ -135,6 +135,17 @@ def _check_address(ip: IpAddress, boundary: ProviderBoundary) -> None:
         )
 
 
+def _bare_host(parts: SplitResult) -> str:
+    """The URL's host, refusing userinfo, a query, a fragment or no host."""
+    if parts.username is not None or parts.password is not None or "@" in parts.netloc:
+        raise DestinationError("provider URL must not carry userinfo")
+    if parts.query or parts.fragment:
+        raise DestinationError("provider URL must not carry a query or a fragment")
+    if not parts.hostname:
+        raise DestinationError("provider URL has no host")
+    return parts.hostname
+
+
 def parse_target(url: str, boundary: ProviderBoundary) -> ProviderTarget:
     """Split and normalise ``url``; refuse userinfo, query, fragment, bad ports."""
     if not isinstance(url, str) or any(c.isspace() or ord(c) < 0x20 for c in url):
@@ -143,19 +154,14 @@ def parse_target(url: str, boundary: ProviderBoundary) -> ProviderTarget:
     scheme = parts.scheme.lower()
     if scheme not in _DEFAULT_PORTS:
         raise DestinationError("provider URL scheme must be http or https")
-    if parts.username is not None or parts.password is not None or "@" in parts.netloc:
-        raise DestinationError("provider URL must not carry userinfo")
-    if parts.query or parts.fragment:
-        raise DestinationError("provider URL must not carry a query or a fragment")
-    if not parts.hostname:
-        raise DestinationError("provider URL has no host")
+    hostname = _bare_host(parts)
     try:
         port = parts.port or _DEFAULT_PORTS[scheme]
     except ValueError:
         raise DestinationError("provider URL port is not valid") from None
     return ProviderTarget(
         scheme=scheme,
-        host=_normalise_host(parts.hostname),
+        host=_normalise_host(hostname),
         port=port,
         path=parts.path.rstrip("/"),
         boundary=boundary,

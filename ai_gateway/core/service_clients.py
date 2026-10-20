@@ -103,22 +103,33 @@ def _parse_entry(
             f"client {client_id!r}: the secret must be stored as its "
             "'sha256$<salt>$<digest>' encoding, never in plaintext"
         )
-    scopes = frozenset(entry.scopes)
-    if len(scopes) != len(entry.scopes):
-        raise ServiceClientConfigError(f"client {client_id!r} repeats a scope")
-    unknown = scopes - KNOWN_SCOPES
-    if unknown:
-        raise ServiceClientConfigError(
-            f"client {client_id!r} has unknown scopes {sorted(unknown)}"
-        )
+    scopes = _scopes(client_id, entry.scopes)
     try:
         credential = ConsumerCredential.from_encoded(client_id, entry.secret, scopes)
     except ValueError:
         raise ServiceClientConfigError(
             f"client {client_id!r}: the secret encoding is malformed"
         ) from None
+    keys = _public_keys(client_id, entry.job_context_public_keys)
+    _check_issuer(client_id, scopes, keys)
+    return credential, keys
+
+
+def _scopes(client_id: str, listed: list[str]) -> frozenset[str]:
+    scopes = frozenset(listed)
+    if len(scopes) != len(listed):
+        raise ServiceClientConfigError(f"client {client_id!r} repeats a scope")
+    unknown = scopes - KNOWN_SCOPES
+    if unknown:
+        raise ServiceClientConfigError(
+            f"client {client_id!r} has unknown scopes {sorted(unknown)}"
+        )
+    return scopes
+
+
+def _public_keys(client_id: str, encoded_keys: Mapping[str, str]) -> dict[str, bytes]:
     keys: dict[str, bytes] = {}
-    for kid, encoded in entry.job_context_public_keys.items():
+    for kid, encoded in encoded_keys.items():
         try:
             key = decode_public_key(encoded)
         except (SignedObjectError, ValueError):
@@ -131,6 +142,12 @@ def _parse_entry(
                 f"client {client_id!r}: kid {kid!r} is not the one its key derives"
             )
         keys[kid] = key
+    return keys
+
+
+def _check_issuer(
+    client_id: str, scopes: frozenset[str], keys: Mapping[str, bytes]
+) -> None:
     issues = JOB_CONTEXT_ISSUE in scopes
     if issues and not keys:
         raise ServiceClientConfigError(
@@ -141,7 +158,6 @@ def _parse_entry(
         raise ServiceClientConfigError(
             f"client {client_id!r} lists job-context keys without {JOB_CONTEXT_ISSUE}"
         )
-    return credential, keys
 
 
 def parse_service_clients(raw: str) -> ServiceClients:
