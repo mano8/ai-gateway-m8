@@ -23,6 +23,7 @@ from fastapi_m8 import (
 )
 
 from .app.main import api_router as domain_router
+from .controllers.errors import ManagementError, management_error_handler
 from .core.config import Settings, settings
 from .core.deps import auth, clock, engine
 from .core.errors import GatewayError, gateway_error_handler
@@ -99,6 +100,7 @@ def build_app(app_settings: Settings) -> FastAPI:
     def configure(app: FastAPI) -> None:
         install_gateway_meta(app, app_settings)
         app.add_exception_handler(GatewayError, gateway_error_handler)
+        app.add_exception_handler(ManagementError, management_error_handler)
 
     return create_app(
         app_settings,

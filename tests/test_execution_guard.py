@@ -8,7 +8,7 @@ import pytest
 from ai_sdk_m8.client import routes
 from ai_sdk_m8.schemas import Capability
 from fastapi import FastAPI
-from fastapi.routing import APIRoute
+from fastapi.routing import iter_route_contexts
 from fastapi.testclient import TestClient
 
 from ai_gateway.app.routes import execution
@@ -107,8 +107,16 @@ def test_every_sdk_execution_route_has_a_capability() -> None:
 
 
 def test_every_gateway_execution_route_depends_on_the_guard() -> None:
+    # Included routers are not flattened into app.routes (FastAPI 0.143);
+    # iter_route_contexts yields each effective route with its full path and
+    # its router-level dependencies.
     prefix = f"{settings.API_PREFIX}{execution.router.prefix}"
-    for route in gateway_app.routes:
-        if isinstance(route, APIRoute) and route.path.startswith(prefix):
+    for route in iter_route_contexts(gateway_app.routes):
+        if (route.path or "").startswith(prefix):
             calls = [d.call for d in route.dependant.dependencies]
             assert require_job_context in calls, route.path
+
+
+def test_the_route_walk_sees_included_routers() -> None:
+    paths = {route.path for route in iter_route_contexts(gateway_app.routes)}
+    assert f"{settings.API_PREFIX}/v1/admin/providers" in paths

@@ -35,6 +35,7 @@ from .clock import ClockSkewMonitor
 from .config import settings
 from .job_context import InstallationAudience, JobContextVerifier
 from .service_clients import PROFILES_READ, execute_scope
+from .ssrf import DestinationPolicy
 from .utc_session import pin_utc_session
 
 # Single instances shared across the entire process.
@@ -61,6 +62,10 @@ CurrentSuperuser = Annotated[UserModel, Depends(require_superuser)]
 
 get_db = engine.session_dep
 SessionDep = Annotated[Session, Depends(get_db)]
+#: The SQLAlchemy engine controllers open Core transactions on.
+db_engine = engine._engine
+#: The provider destination posture every ``base_url`` write is checked against.
+destination_policy = DestinationPolicy.from_settings(settings)
 
 #: One service-client guard per capability, each requiring ``execute:<cap>``.
 execution_client_guards: dict[Capability, Callable[[Request], str]] = {
