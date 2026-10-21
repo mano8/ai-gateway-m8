@@ -84,6 +84,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Bindings follow their credential's status, and every transition is
   audited in `ai_credential_audit`. The superuser's `v1/admin/user-credentials`
   stop lists, disables and deletes user keys only (A-2).
+- Tenant and user bindings (`T20a`) at `v1/tenants/{tenant_id}/bindings` and
+  `v1/me/bindings`, with the same rules as global bindings. A credential the
+  scope does not hold answers one `422`. While BYOK is off, user binding
+  writes answer `403`.
+- C-04 resolution (`controllers/resolution.py`), for the reservation to call:
+  user → tenant → global from the signed claims; an unavailable credential
+  fails closed unless the owner set `fall_through`, which is audited; D-08,
+  the `rerank` local-only rule, `allowed_boundaries` and the restricted-OCR
+  restore residual on the resolved candidate, each refusal final. The
+  embedding space is derived from the resolved model and profile revision.
+- `/health` reports the user bindings held unavailable while
+  `AI_USER_BYOK_ENABLED` is false (degraded while any exist).
 - `/health` reports the credential store (KEK probe). The web and scheduler
   refuse to start while a stored version needs a KEK or fingerprint-key
   generation the replica does not hold.

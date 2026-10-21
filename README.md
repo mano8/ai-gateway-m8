@@ -60,6 +60,7 @@ Paths are the `ai-sdk-m8` route table's, under `{API_PREFIX}`:
 | `v1/tenants/{tenant_id}/credentials` | an `ADMIN` whose token carries that `tenant_id`, or a superuser | one tenant's credentials |
 | `v1/me/credentials` | `WRITER` and above | the caller's own credentials (owner and tenant from the token) |
 | `v1/admin/user-credentials` | superuser | list, disable or delete a user's credential, nothing else |
+| `v1/tenants/{tenant_id}/bindings`, `v1/me/bindings` | as the scope's credentials | the scope's bindings |
 
 - **Providers.** `base_url` passes the static destination check on every
   write. `boundary` is fixed. The endpoint (`base_url`, `provider_type`,
@@ -88,6 +89,14 @@ Paths are the `ai-sdk-m8` route table's, under `{API_PREFIX}`:
   re-confirming a user credential answer `403`. A binding follows its
   credential: unless the credential is `active`, the binding is
   `credential_unavailable`.
+- **Bindings and resolution (C-04).** A binding names a model and one of
+  its own scope's credentials. An execution resolves the user binding first,
+  then the tenant's, then the global one, from the signed context's
+  `(tenant_id, user_id)` only. A scope without a binding falls through. A
+  scope with one fails closed when its credential is unavailable, unless its
+  owner set `fall_through`, and each fall-through is audited. The D-08 policy
+  is then applied to the candidate actually resolved, and a denial there is
+  final.
 - **Published profiles.** A profile is published when it has a global
   binding. Embedding profiles carry `dimensions` and `embedding_space_id =
   h(provider_id, external_model_id, model_revision, dimensions,

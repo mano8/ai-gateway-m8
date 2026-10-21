@@ -133,6 +133,32 @@ typed `401` (`context_missing`, `context_invalid`, `context_expired`,
 
 ### Data-class policy and provider destinations
 
+The gateway resolves the destination itself, inside the transaction that
+records it on the execution row (`ai_gateway/controllers/resolution.py`). The
+destination checked is therefore the destination dispatched, and a binding
+repointed after that point changes nothing.
+
+- **Precedence.** User binding, then tenant binding, then global binding.
+  The user binding consulted is the one whose tenant and owner equal the
+  signed context's `tenant_id` and `user_id`. A context without `user_id`
+  never reaches one, and a user's binding never serves another tenant.
+- **Unavailable credentials fail closed.** A bound credential that is
+  disabled, invalid, deleted, awaiting re-confirmation or throttled answers
+  `credential_unavailable` (or `rate_limited` with `Retry-After`) before any
+  provider request. The same holds for a user binding while
+  `AI_USER_BYOK_ENABLED` is false. Only `fall_through`, set by the binding's
+  owner, moves on to the next scope, and every such move is audited.
+  Switching user BYOK off never silently moves a user's data to the tenant's
+  or the platform's key, and `/health` counts the user bindings it holds.
+- **Destination policy, applied to the resolved candidate.** `rerank` goes to
+  `local` providers only, whatever the policy says (`boundary_denied`). A
+  signed `allowed_boundaries` claim must contain the provider's boundary.
+  `internal` and `restricted` data reach `local` providers or the context's
+  own BYOK credential, never an external platform key (`data_class_denied`).
+  On the database backends, `restricted` OCR never goes to an `external`
+  provider while the restore residual is not accepted. A denial is final: it
+  never sends the request on to the next scope.
+
 ### Server-side request forgery and outbound egress
 
 A provider's `base_url` is checked when it is written and again, with every
