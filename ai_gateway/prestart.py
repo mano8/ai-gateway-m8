@@ -9,7 +9,9 @@ The checks, in order, and nothing else:
 3. read ``alembic_version_ai`` (read-only, as the runtime role) and exit
    unless it equals the head packaged in this image;
 4. exit unless the database records this ``AI_DEPLOYMENT_ID`` as its
-   installation.
+   installation;
+5. exit unless this replica holds every KEK and fingerprint-key generation a
+   stored credential version needs (D-23), naming the missing ones.
 
 The run-modes never execute Alembic: no ``upgrade``, no autogenerate, no DDL.
 Migrations run only through the ``ai-migrate`` one-shot
@@ -176,6 +178,15 @@ def main() -> int:
     try:
         check_installation(engine._engine, settings.AI_DEPLOYMENT_ID)
     except InstallationError as exc:
+        logger.error("%s", exc)
+        return 1
+    from ai_gateway.core.deps import credential_store  # noqa: PLC0415
+    from ai_gateway.credentials.database import KeyCoverageError  # noqa: PLC0415
+
+    try:
+        with engine._engine.connect() as connection:
+            credential_store.check_coverage(connection)
+    except KeyCoverageError as exc:
         logger.error("%s", exc)
         return 1
     return 0

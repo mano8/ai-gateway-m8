@@ -12,6 +12,10 @@ uvicorn>=0.52.1
 
 alembic>=1.18.4
 
+# Envelope encryption of provider credentials (AES-256-GCM, D-23); the fleet
+# floor auth-sdk-m8 already requires.
+cryptography>=48.0.1
+
 pydantic>=2.13.4
 pydantic_settings>=2.14.2
 

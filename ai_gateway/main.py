@@ -25,7 +25,7 @@ from fastapi_m8 import (
 from .app.main import api_router as domain_router
 from .controllers.errors import ManagementError, management_error_handler
 from .core.config import Settings, settings
-from .core.deps import auth, clock, engine
+from .core.deps import auth, clock, credential_store, engine
 from .core.errors import GatewayError, gateway_error_handler
 from .core.events import make_lifespan_extras
 from .core.meta import install_gateway_meta
@@ -54,6 +54,12 @@ async def check_spool_filesystem() -> None:
 async def check_installation_identity() -> None:
     """Start-up assertion: the database records this installation (C-14)."""
     check_installation(engine._engine, settings.AI_DEPLOYMENT_ID)
+
+
+async def check_credential_keys() -> None:
+    """Start-up assertion: every stored version's key generations are held (D-23)."""
+    with engine._engine.connect() as connection:
+        credential_store.check_coverage(connection)
 
 
 def _metrics_response() -> Response:
@@ -107,12 +113,18 @@ def build_app(app_settings: Settings) -> FastAPI:
         api_router,
         service_name=app_settings.PROJECT_NAME,
         service_version=app_settings.SERVICE_VERSION,
-        health=HealthConfig(checks=[check_db, clock.health_check]),
+        health=HealthConfig(
+            checks=[check_db, clock.health_check, credential_store.health]
+        ),
         lifecycle=AppLifecycle(
             auth_deps=auth,
             db_engine=engine,
             lifespan_extras=make_lifespan_extras(app_settings, auth),
-            startup_validators=[check_spool_filesystem, check_installation_identity],
+            startup_validators=[
+                check_spool_filesystem,
+                check_installation_identity,
+                check_credential_keys,
+            ],
             configure=configure,
         ),
     )

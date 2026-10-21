@@ -20,6 +20,7 @@ from ai_sdk_m8.schemas.management import ScopeType
 from pydantic import SecretStr
 from sqlalchemy import Connection
 
+from ai_gateway.core import deps
 from ai_gateway.core.errors import GatewayError
 from ai_gateway.credentials.store import (
     CredentialIdentity,
@@ -28,6 +29,10 @@ from ai_gateway.credentials.store import (
     released,
 )
 from fake_store import InMemoryCredentialStore
+from sqlalchemy import insert, update
+
+from ai_gateway.db_models.credentials import ai_credential
+import factories
 
 FIRST = SecretStr("sk-first-0123456789abcdefghijklmnop")
 SECOND = SecretStr("sk-second-0123456789abcdefghijklmno")
@@ -57,8 +62,52 @@ def _memory() -> Backend:
     return Backend(store, new_credential, lambda: nullcontext(None), set_status)  # type: ignore[arg-type]
 
 
+def provisioning_credential(
+    scope_type: ScopeType = ScopeType.TENANT,
+) -> CredentialIdentity:
+    """The provisioning row a controller inserts before ``store``."""
+    tenant = uuid.uuid4() if scope_type is not ScopeType.GLOBAL else None
+    owner = uuid.uuid4() if scope_type is ScopeType.USER else None
+    credential_id = uuid.uuid4()
+    with deps.db_engine.begin() as connection:
+        provider_id = factories.provider(connection)
+        connection.execute(
+            insert(ai_credential).values(
+                id=credential_id,
+                scope_type=scope_type.value,
+                tenant_id=tenant,
+                owner_user_id=owner,
+                provider_id=provider_id,
+                name="key",
+                status="provisioning",
+                secret_backend="database",
+            )
+        )
+    return CredentialIdentity(credential_id, provider_id, scope_type, tenant, owner)
+
+
+def _database() -> Backend:
+    def set_status(credential_id: uuid.UUID, status: str) -> None:
+        with deps.db_engine.begin() as connection:
+            connection.execute(
+                update(ai_credential)
+                .where(ai_credential.c.id == credential_id)
+                .values(status=status)
+            )
+
+    return Backend(
+        deps.credential_store,
+        provisioning_credential,
+        deps.db_engine.begin,
+        set_status,
+    )
+
+
 #: Every backend the contract runs against.
-BACKENDS: dict[str, Callable[[], Backend]] = {"memory": _memory}
+BACKENDS: dict[str, Callable[[], Backend]] = {
+    "memory": _memory,
+    "database+local": _database,
+}
 
 
 @pytest.fixture(params=sorted(BACKENDS))

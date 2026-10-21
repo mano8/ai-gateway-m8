@@ -31,6 +31,8 @@ from fastapi_m8 import (
     create_db_engine,
 )
 
+from ai_gateway.credentials.factory import build_credential_store
+
 from .clock import ClockSkewMonitor
 from .config import settings
 from .job_context import InstallationAudience, JobContextVerifier
@@ -66,6 +68,8 @@ SessionDep = Annotated[Session, Depends(get_db)]
 db_engine = engine._engine
 #: The provider destination posture every ``base_url`` write is checked against.
 destination_policy = DestinationPolicy.from_settings(settings)
+#: The configured credential store (C-06); the only path to credential material.
+credential_store = build_credential_store(settings, engine._engine)
 
 #: One service-client guard per capability, each requiring ``execute:<cap>``.
 execution_client_guards: dict[Capability, Callable[[Request], str]] = {
