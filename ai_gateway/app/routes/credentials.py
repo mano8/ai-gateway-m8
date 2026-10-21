@@ -26,7 +26,6 @@ JWT ``sub``.
 # globals, where the factory's local ``CallerDep`` does not exist. The route
 # would then lose its caller dependency.
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Annotated
 from uuid import UUID
 
@@ -36,66 +35,20 @@ from ai_sdk_m8.schemas.management import (
     CredentialRotate,
     CredentialUpdate,
     RemoteArtifactPublic,
-    ScopeType,
 )
 from fastapi import APIRouter, Depends, Query, status
 
-from ai_gateway.controllers import credentials
-from ai_gateway.controllers.audit import Actor, audited_transaction
-from ai_gateway.controllers.errors import Forbidden, NotFound
-from ai_gateway.controllers.ratelimit import charge_credential_write
-from ai_gateway.controllers.scopes import GLOBAL, Scope
-from ai_gateway.core.config import settings
-from ai_gateway.core.deps import (
-    CurrentAdmin,
-    CurrentSuperuser,
-    CurrentWriter,
-    credential_store,
-    db_engine,
+from ai_gateway.app.routes.callers import (
+    Caller,
+    global_caller,
+    tenant_caller,
+    user_caller,
 )
-from fastapi_m8 import UserModel, has_superuser_privileges
-
-
-@dataclass(frozen=True)
-class Caller:
-    """Who calls and in which scope; the scope comes from the route and token."""
-
-    scope: Scope
-    actor: Actor
-
-    @property
-    def subject(self) -> str:
-        """The JWT ``sub`` writes are rate-limited by."""
-        return str(self.actor.id)
-
-    def require_user_byok(self) -> None:
-        """Refuse a user-scope write that adds or re-activates a key (Q6, A-3)."""
-        if self.scope.scope_type is ScopeType.USER and not settings.user_byok_enabled:
-            raise Forbidden("user-scoped credentials are disabled in this deployment")
-
-
-def global_caller(user: CurrentSuperuser) -> Caller:
-    """The platform's own scope."""
-    return Caller(GLOBAL, Actor.of_user(user))
-
-
-def _is_superuser(user: UserModel) -> bool:
-    return has_superuser_privileges(user.role, user.is_superuser)
-
-
-def tenant_caller(tenant_id: UUID, user: CurrentAdmin) -> Caller:
-    """A matching-tenant ``ADMIN``, or a superuser; anyone else gets 404."""
-    if not _is_superuser(user) and (
-        user.tenant_id is None or user.tenant_id != tenant_id
-    ):
-        raise NotFound("no such credential")
-    return Caller(Scope(ScopeType.TENANT, tenant_id=tenant_id), Actor.of_user(user))
-
-
-def user_caller(user: CurrentWriter) -> Caller:
-    """The token's own user, in the token's tenant (A-1)."""
-    scope = Scope(ScopeType.USER, tenant_id=user.tenant_id, owner_user_id=user.id)
-    return Caller(scope, Actor.of_user(user))
+from ai_gateway.controllers import credentials
+from ai_gateway.controllers.audit import audited_transaction
+from ai_gateway.controllers.ratelimit import charge_credential_write
+from ai_gateway.core.config import settings
+from ai_gateway.core.deps import credential_store, db_engine
 
 
 def credential_router(prefix: str, caller: Callable[..., Caller]) -> APIRouter:

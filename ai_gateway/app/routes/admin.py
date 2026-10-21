@@ -13,9 +13,6 @@ from uuid import UUID
 
 from ai_sdk_m8.schemas._base import ProfileKey
 from ai_sdk_m8.schemas.management import (
-    BindingCreate,
-    BindingPublic,
-    BindingUpdate,
     ModelAdmin,
     ModelCreate,
     ModelUpdate,
@@ -29,8 +26,9 @@ from ai_sdk_m8.schemas.management import (
 )
 from fastapi import APIRouter, Depends, Path, status
 
+from ai_gateway.app.routes import bindings as binding_routes
 from ai_gateway.app.routes.credentials import global_router, user_stop_router
-from ai_gateway.controllers import bindings, registry
+from ai_gateway.controllers import registry
 from ai_gateway.controllers.audit import Actor, audited_transaction
 from ai_gateway.core.deps import (
     CurrentSuperuser,
@@ -45,8 +43,9 @@ router = APIRouter(
 
 ProfileKeyPath = Annotated[ProfileKey, Path()]
 
-# The platform's own credentials and the user-scope stop (T20).
+# The platform's own credentials and bindings, and the user-scope stop (T20).
 router.include_router(global_router)
+router.include_router(binding_routes.global_router)
 router.include_router(user_stop_router)
 
 
@@ -164,47 +163,3 @@ def list_revisions(profile_key: ProfileKeyPath) -> list[ProfileRevisionAdmin]:
     """Every revision of a profile."""
     with db_engine.connect() as connection:
         return registry.list_revisions(connection, profile_key)
-
-
-# --- global bindings -----------------------------------------------------------
-
-
-@router.get("/bindings", response_model=list[BindingPublic])
-def list_bindings() -> list[BindingPublic]:
-    """Every global binding."""
-    with db_engine.connect() as connection:
-        return bindings.list_bindings(connection, bindings.GLOBAL)
-
-
-@router.post(
-    "/bindings", response_model=BindingPublic, status_code=status.HTTP_201_CREATED
-)
-def create_binding(body: BindingCreate, user: CurrentSuperuser) -> BindingPublic:
-    """Bind a profile globally."""
-    with audited_transaction(db_engine) as tx:
-        return bindings.create_binding(tx, Actor.of_user(user), bindings.GLOBAL, body)
-
-
-@router.get("/bindings/{binding_id}", response_model=BindingPublic)
-def get_binding(binding_id: UUID) -> BindingPublic:
-    """One global binding."""
-    with db_engine.connect() as connection:
-        return bindings.get_binding(connection, bindings.GLOBAL, binding_id)
-
-
-@router.patch("/bindings/{binding_id}", response_model=BindingPublic)
-def update_binding(
-    binding_id: UUID, body: BindingUpdate, user: CurrentSuperuser
-) -> BindingPublic:
-    """Change a global binding."""
-    with audited_transaction(db_engine) as tx:
-        return bindings.update_binding(
-            tx, Actor.of_user(user), bindings.GLOBAL, binding_id, body
-        )
-
-
-@router.delete("/bindings/{binding_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_binding(binding_id: UUID, user: CurrentSuperuser) -> None:
-    """Remove a global binding."""
-    with audited_transaction(db_engine) as tx:
-        bindings.delete_binding(tx, Actor.of_user(user), bindings.GLOBAL, binding_id)

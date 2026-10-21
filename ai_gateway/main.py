@@ -23,6 +23,7 @@ from fastapi_m8 import (
 )
 
 from .app.main import api_router as domain_router
+from .controllers.bindings import count_user_bindings
 from .controllers.errors import ManagementError, management_error_handler
 from .core.config import Settings, settings
 from .core.deps import auth, clock, credential_store, engine
@@ -43,6 +44,34 @@ async def check_db() -> HealthCheckResult:
         return HealthCheckResult(
             name="database", status=HealthStatus.FAIL, error=type(exc).__name__
         )
+
+
+async def check_user_bindings() -> HealthCheckResult:
+    """
+    C-04, A-3: user bindings held unavailable while user BYOK is off.
+
+    Switching ``AI_USER_BYOK_ENABLED`` off never moves a user's data to the
+    tenant's or the platform's key: each user binding then fails closed per
+    its ``on_unavailable``. ``/health`` counts them, degraded while any exist.
+    """
+    if settings.user_byok_enabled:
+        return HealthCheckResult(
+            name="user_bindings",
+            status=HealthStatus.OK,
+            meta={"user_byok_enabled": True},
+        )
+    try:
+        with engine._engine.connect() as connection:
+            held = count_user_bindings(connection)
+    except Exception as exc:
+        return HealthCheckResult(
+            name="user_bindings", status=HealthStatus.FAIL, error=type(exc).__name__
+        )
+    return HealthCheckResult(
+        name="user_bindings",
+        status=HealthStatus.DEGRADED if held else HealthStatus.OK,
+        meta={"user_byok_enabled": False, "held_unavailable": held},
+    )
 
 
 async def check_spool_filesystem() -> None:
@@ -114,7 +143,12 @@ def build_app(app_settings: Settings) -> FastAPI:
         service_name=app_settings.PROJECT_NAME,
         service_version=app_settings.SERVICE_VERSION,
         health=HealthConfig(
-            checks=[check_db, clock.health_check, credential_store.health]
+            checks=[
+                check_db,
+                clock.health_check,
+                credential_store.health,
+                check_user_bindings,
+            ]
         ),
         lifecycle=AppLifecycle(
             auth_deps=auth,

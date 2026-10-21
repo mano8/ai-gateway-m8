@@ -296,9 +296,20 @@ def sync_credential_status(connection: Connection, credential_id: uuid.UUID) -> 
     return int(result.rowcount)
 
 
+def count_user_bindings(connection: Connection) -> int:
+    """How many user-scope bindings exist (``/health`` while BYOK is off, A-3)."""
+    statement = (
+        sa.select(sa.func.count())
+        .select_from(ai_profile_binding)
+        .where(ai_profile_binding.c.scope_type == ScopeType.USER.value)
+    )
+    return int(connection.execute(statement).scalar_one())
+
+
 __all__ = [
     "GLOBAL",
     "Scope",
+    "count_user_bindings",
     "create_binding",
     "delete_binding",
     "get_binding",
