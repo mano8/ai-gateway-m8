@@ -47,6 +47,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `python -m ai_gateway.installation init`, run by `ai-migrate`, records the
   installation id once; web and scheduler refuse to start against another id
   or none.
+- Auth dependencies (`T17`): `CurrentReader`, `CurrentWriter`,
+  `CurrentAdmin`, `CurrentSuperuser` and `require_superuser` on the
+  fresh-revocation path. The execution guard authenticates the service client
+  through `fastapi-m8`'s guard with the route's `execute:` scope, and verifies
+  `X-AI-Job-Context` against the issuer's registered keys, the presenting
+  client (`azp`), the route's capability and the recorded installation
+  (`aud`). `redeem_job_context` counts `(iss, jti)` once, atomically, with
+  `exp` asserted on the database clock. Refusals are typed `AiError` answers.
 
 ### Changed
 
@@ -56,6 +64,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `fastapi-m8`'s service-client guard over the gateway's `AI_SERVICE_CLIENTS`
   registry, and check that the lock satisfies both floors.
 - The test suite runs against PostgreSQL (CI starts a service container).
+- Execution routes live under `v1/execute`, the `ai-sdk-m8` route table's
+  prefix. The test environment registers real service clients and issuer
+  keys.
 
 ## [0.1.0] - 2026-10-18
 

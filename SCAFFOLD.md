@@ -82,7 +82,7 @@ are relative to this repository.
 
 | File | Purpose |
 | --- | --- |
-| `ai_gateway/core/execution_guard.py` | mandatory job-context dependency and the execution-router factory; fails closed |
+| `ai_gateway/core/execution_guard.py` | mandatory service-client and job-context dependency and the execution-router factory; verifies since `T17` (`core/job_context.py`) |
 | `ai_gateway/app/routes/execution.py`, `management.py` | the two routers, with no route yet |
 | `ai_gateway/prestart.py` | DB wait and the read-only `alembic_version_ai` check |
 | `ai_gateway/scheduler.py`, `scripts/scheduler_start.sh` | scheduler run-mode; refuses to run until a job exists |

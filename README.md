@@ -13,8 +13,9 @@ fleet's services.
 
 > **Status: foundation in progress.** The settings refuse every contradiction
 > at boot, `/meta` reports the gateway's ratified values, and `/health` checks
-> the database and the application–database clock skew. Every execution
-> request is still refused until the job-context verifier lands.
+> the database and the application–database clock skew. Execution requests
+> are authenticated and their job contexts verified; no execution route is
+> served yet.
 
 ## Architecture
 
@@ -29,6 +30,22 @@ fleet's services.
   client; they are built by `build_execution_router`, which attaches the
   mandatory guard, and a user JWT is never sufficient there. No route accepts
   an API-key principal.
+- **Management tiers** (`ai_gateway/core/deps.py`): `CurrentReader`,
+  `CurrentWriter`, `CurrentAdmin` and `CurrentSuperuser` (`require_superuser`:
+  the `SUPERADMIN` role and `is_superuser`). All four use `fastapi-m8`'s
+  fresh-revocation path, so a token revoked inside the positive-cache window
+  is refused.
+- **Execution guard** (`ai_gateway/core/execution_guard.py`). The route's
+  capability comes from the `ai-sdk-m8` route table, and a route outside it
+  is refused. The service client is authenticated by `fastapi-m8`'s guard over
+  `AI_SERVICE_CLIENTS` with that capability's `execute:` scope. Then
+  `X-AI-Job-Context` is verified (`ai_gateway/core/job_context.py`): the
+  signed-object rule, `iss` holding `job-context:issue` and owning `kid`,
+  `azp` equal to the presenting client, the route's capability, and `aud`
+  equal to `ai-gateway/<deployment_id>` as `ai_installation` records it. The
+  handler binds the request's profile and redeems `(iss, jti)` once, in the
+  transaction that records the execution, with `exp` re-asserted on the
+  database clock.
 - **Own database.** PostgreSQL `ai_db` with its own `alembic_version_ai`
   table. Migrations are packaged with the image. Two roles: `ai_owner` owns
   the schema and is used only by `ai-migrate`; `ai_runtime` (web and

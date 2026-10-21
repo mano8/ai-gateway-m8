@@ -42,6 +42,28 @@ and the data each provider call discloses.
 
 ### Job-context forgery, replay and substitution
 
+A context is accepted only when all of these hold, and every refusal is a
+typed `401` (`context_missing`, `context_invalid`, `context_expired`,
+`context_replayed`) that never echoes the token:
+
+- the presenting service client authenticates (hashed secret, constant-time
+  comparison) and holds `execute:<capability>` for the route;
+- the header is at most 4 KiB, checked before decoding; the payload is strict
+  canonical JSON in strict unpadded base64url, checked before any signature
+  work; the signature verifies under the `m8.ai.job-context.v1` domain, so a
+  receipt or attestation signed by the same key is refused;
+- `iss` holds `job-context:issue` and owns `kid`: a context signed with
+  another client's key is refused even when that key is registered;
+- `azp` is the presenting client, `aud` is this installation as
+  `ai_installation` records it, the capability is the route's and the profile
+  is the request's;
+- `iat`/`nbf` lead the clock by at most `AI_JOB_CONTEXT_CLOCK_SKEW_SECONDS`,
+  `exp` gets no leeway, and the lifetime is within the context or dispatch TTL;
+- `(iss, jti)` is redeemed once (`max_uses = 1`) by a single atomic statement
+  that also asserts `exp > now()` on the database clock, so a replica whose
+  clock lags cannot redeem an expired context. The redemption commits with the
+  row transition it authorizes.
+
 ### Data-class policy and provider destinations
 
 ### Server-side request forgery and outbound egress
@@ -80,8 +102,10 @@ inside a compromised gateway is not constrained by them.
 
 ## Controls in place in this scaffold
 
-- Execution routes refuse every request (`401 context_invalid`) until the
-  job-context verifier lands; the guard never reads `Authorization`.
+- Execution routes require an authenticated service client with the route's
+  `execute:` scope and a verified, single-use job context; the guard never
+  reads `Authorization`, and a route whose capability the SDK route table does
+  not declare is refused.
 - No API-key principal is wired on any route.
 - Service code cannot import `auth-sdk-m8` directly, and only
   `ai_gateway/credentials/` may import the credential version model
