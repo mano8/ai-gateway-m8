@@ -55,7 +55,7 @@ are relative to this repository.
 | `Dockerfile` | `ai_gateway/Dockerfile` | same two stages, digest, Debian patch layer and lock install; setuptools/wheel guard and import check as in `media-service-m8`; scripts normalised; build context is the repository root |
 | `scripts/docker_start.sh` | `ai_gateway/scripts/docker_start.sh` | **no autogenerate, no migration**: pre-start checks, then uvicorn |
 | `scripts/pre_start.sh` | `ai_gateway/scripts/pre_start.sh` | **no `alembic upgrade`**: runs `python -m ai_gateway.prestart` (DB wait plus the read-only revision check) |
-| `requirements_base.txt` | `ai_gateway/requirements_base.txt` | `fastapi-m8[db,postgres]` only (PostgreSQL-only); unrelated dependencies dropped; `cryptography` direct since `T22` |
+| `requirements_base.txt` | `ai_gateway/requirements_base.txt` | `fastapi-m8[db,postgres]` only (PostgreSQL-only); unrelated dependencies dropped; `cryptography` direct since `T22`, `hvac` since `T23` |
 | `requirements_dev.txt` | `ai_gateway/requirements_dev.txt` | `ruff` pinned exactly, `pip-audit` added, build tools dropped |
 | `requirements_prod.txt` | `ai_gateway/requirements_prod.txt` | unchanged |
 | `requirements_prod.lock` | `ai_gateway/requirements_prod.lock` | regenerated from the gateway's own requirements (Python 3.14, Linux, PyPI only) |

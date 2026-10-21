@@ -96,6 +96,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   embedding space is derived from the resolved model and profile revision.
 - `/health` reports the user bindings held unavailable while
   `AI_USER_BYOK_ENABLED` is false (degraded while any exist).
+- The `vault_transit` KEK provider (`T23`). `hvac` runs on a dedicated
+  session with `trust_env=False`, TLS verification always on and redirects
+  refused. Authentication is `token_file` (re-read on a `403`) or `approle`
+  (a new login before 80 % of the lease, and once on a `403`). Data keys are
+  wrapped by `transit/encrypt` and unwrapped by `transit/decrypt`, with the
+  version's AAD as associated data. Generations are labelled `transit-v<n>`,
+  and `rewrap` decrypts and encrypts under the latest version. The health
+  probe is `lookup-self` plus an encrypt → decrypt round trip, never a
+  metadata read. `database` + `vault_transit` deployments are now served.
 - `/health` reports the credential store (KEK probe). The web and scheduler
   refuse to start while a stored version needs a KEK or fingerprint-key
   generation the replica does not hold.
@@ -117,8 +126,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   keys.
 - `cryptography>=48.0.1` is a direct requirement (the envelope uses it); the
   lock is unchanged except for that annotation.
-- A deployment configured for `vault_transit` or `vault` now refuses to start
-  until those stores land (`T23`, `T24`).
+- A deployment configured for the `vault` KV backend refuses to start until
+  that store lands (`T24`).
+- `hvac>=2.3.0` is a direct requirement. The lock adds `hvac` 2.4.0,
+  `requests` 2.34.2, `urllib3` 2.8.0 and `charset-normalizer` 3.5.2, and
+  moves `certifi` 2026.7.22 → 2026.10.19 (PYSEC-2026-4320) with a narrow
+  `--upgrade-package certifi`; no other pin moved.
 - Management routes live under `v1` (`v1/admin`, `v1/profiles`), the
   `ai-sdk-m8` route table's paths, instead of `/manage`.
 - The route walk also refuses any unexpected query parameter, which is how

@@ -211,11 +211,13 @@ pip-compile --generate-hashes --no-emit-index-url --no-strip-extras \
 
 ## Credential storage and key rotation
 
-The `database` backend with a `local` KEK stores each credential version as
-an AES-256-GCM envelope in `ai_db`. Every version gets a fresh data key, which
-is wrapped by the KEK file and bound to the version's row context. The
-`vault_transit` KEK (`T23`) and the `vault` KV backend (`T24`) are not served
-yet, and a deployment configured for them refuses to start. The web and
+The `database` backend stores each credential version as an AES-256-GCM
+envelope in `ai_db`. Every version gets a fresh data key bound to the
+version's row context. With the `local` KEK the data key is wrapped by the KEK
+file. With `vault_transit`, the recommended hardened mode, it is wrapped by
+a Vault transit key, the version's context is sent as associated data, and
+the gateway holds no KEK at all. The `vault` KV backend (`T24`) is not served
+yet, and a deployment configured for it refuses to start. The web and
 scheduler run-modes also refuse to start while a stored version needs a KEK
 or fingerprint-key generation this replica does not hold, and they name it.
 
@@ -235,6 +237,18 @@ Rotate a key in the D-23 order:
 `python -m ai_gateway.credentials generations` prints the rows per
 generation. Each command prints generation labels and counts only, and each
 change is audited.
+
+For `vault_transit`, the rotation follows the same order on Vault's key
+versions: rotate the transit key, run `rewrap` and then `rewrap --verify`,
+and only then raise `min_decryption_version`. Never set the key's
+`exportable` flag. The gateway's AppRole (or token) needs only this policy;
+it never reads the key's metadata:
+
+```hcl
+path "transit/encrypt/<key>" { capabilities = ["update"] }
+path "transit/decrypt/<key>" { capabilities = ["update"] }
+path "auth/token/lookup-self" { capabilities = ["read"] }
+```
 
 ## Deployment
 

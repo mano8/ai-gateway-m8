@@ -77,6 +77,18 @@ generation it does not hold. A rotation re-wraps data keys without touching
 ciphertext (`rewrap`), and `--verify` proves no row remains under the old
 generation before the key is removed.
 
+**Vault (`vault_transit`).** `hvac` runs on its own `requests` session, which
+ignores the environment (proxy variables and `.netrc` alike) and always
+verifies TLS (`AI_VAULT_CA_FILE` or the system store). It refuses redirects,
+because `requests` would forward `X-Vault-Token` to another host, and Vault
+speaks only `https` under production/strict. An AppRole login is renewed
+before its lease ends, and a `403` logs in again once. The token and the
+`secret_id` are never logged. Data keys are wrapped and unwrapped with the
+version's AAD as associated data. Health and execution use only
+`lookup-self`, `encrypt` and `decrypt`, never a read of the key's metadata.
+An unreachable Vault answers `credential_unavailable` for reads and writes,
+never a fallback to another key.
+
 **Fingerprints.** A fingerprint is HMAC-SHA256 under the fingerprint key over
 the credential's scope and the secret. It can only detect the same key twice
 within one tenant's or one user's scope. The same key in two scopes has two
