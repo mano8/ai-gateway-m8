@@ -7,13 +7,18 @@ developer ``.env``, which keeps this suite identical locally and in CI (where no
 ``.env`` is checked in).
 
 Every value here is a throwaway placeholder. The key files are random and
-written to a private temporary directory, mode 0600, before the import.
+written to a private temporary directory, mode 0600, before the import. The
+service clients in ``AI_SERVICE_CLIENTS`` are real: random secrets stored as
+their salted digests, and fresh Ed25519 issuer keys, so the execution guard
+runs against the registry the gateway parses.
 """
 
 from __future__ import annotations
 
 import atexit
+import json
 from collections.abc import Iterator
+from dataclasses import dataclass, field
 import os
 import secrets
 import shutil
@@ -22,6 +27,21 @@ import uuid
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+from ai_sdk_m8.signed import (
+    derive_kid,
+    encode_public_key,
+    generate_seed,
+    public_key_from_seed,
+)
+
+# Not through fastapi_m8: importing it here would bind the real ``find_dotenv``
+# before the stub below replaces it.
+from auth_sdk_m8.security.consumer_auth import (
+    INTERNAL_CLIENT_HEADER,
+    INTERNAL_TOKEN_HEADER,
+    ConsumerCredential,
+)
 
 #: Private directory for the test key files (removed at interpreter exit).
 KEY_DIR = Path(tempfile.mkdtemp(prefix="ai-gateway-test-keys-"))
@@ -40,6 +60,61 @@ import pg_harness as pg  # noqa: E402
 
 KEK_FILE = write_key_file("kek")
 FINGERPRINT_KEY_FILE = write_key_file("fingerprint")
+
+
+@dataclass(frozen=True)
+class ServiceIdentity:
+    """A registered test service client; ``seed`` signs its job contexts."""
+
+    client_id: str
+    scopes: tuple[str, ...]
+    seed: bytes | None = None
+    secret: str = field(default_factory=lambda: secrets.token_urlsafe(48))
+
+    @property
+    def kid(self) -> str:
+        """The ``kid`` its seed derives."""
+        assert self.seed is not None
+        return derive_kid(public_key_from_seed(self.seed))
+
+    def headers(self, secret: str | None = None) -> dict[str, str]:
+        """The ``X-Internal-Client`` / ``X-Internal-Token`` pair."""
+        return {
+            INTERNAL_CLIENT_HEADER: self.client_id,
+            INTERNAL_TOKEN_HEADER: self.secret if secret is None else secret,
+        }
+
+    def entry(self) -> dict[str, object]:
+        """The ``AI_SERVICE_CLIENTS`` entry: hashed secret, scopes, keys."""
+        encoded = ConsumerCredential.create(self.client_id, self.secret).encoded_secret
+        value: dict[str, object] = {"secret": encoded, "scopes": list(self.scopes)}
+        if self.seed is not None:
+            public = encode_public_key(public_key_from_seed(self.seed))
+            value["job_context_public_keys"] = {self.kid: public}
+        return value
+
+
+#: Signs contexts for its own synchronous calls and for the documents worker.
+MEDIA_SERVICE = ServiceIdentity(
+    "media-service",
+    (
+        "execute:embedding",
+        "execute:rerank",
+        "execute:structured_output",
+        "job-context:issue",
+        "profiles:read",
+    ),
+    seed=generate_seed(),
+)
+#: Presents contexts media-service signed for it (``azp = media-worker``).
+MEDIA_WORKER = ServiceIdentity("media-worker", ("execute:ocr",))
+#: A second issuer: its key must never stand in for media-service's.
+DOC_ISSUER = ServiceIdentity(
+    "doc-issuer", ("execute:embedding", "job-context:issue"), seed=generate_seed()
+)
+#: Reads profiles only; executes nothing.
+PROFILE_READER = ServiceIdentity("profile-reader", ("profiles:read",))
+SERVICE_CLIENTS = (MEDIA_SERVICE, MEDIA_WORKER, DOC_ISSUER, PROFILE_READER)
 
 TEST_ISSUER = "https://auth.test.invalid"
 HEALTH_DETAIL = {"X-Internal-Token": "GatewayTests-Health-Detail-Credential-1"}
@@ -82,7 +157,7 @@ TEST_ENV = {
     "AI_CREDENTIAL_KEK_PROVIDER": "local",
     "AI_CREDENTIAL_KEK_FILE": str(KEK_FILE),
     "AI_CREDENTIAL_FINGERPRINT_KEY_FILE": str(FINGERPRINT_KEY_FILE),
-    "AI_SERVICE_CLIENTS": "{}",
+    "AI_SERVICE_CLIENTS": json.dumps({c.client_id: c.entry() for c in SERVICE_CLIENTS}),
     "AI_MAX_CREDENTIALS_PER_SCOPE": "10",
 }
 

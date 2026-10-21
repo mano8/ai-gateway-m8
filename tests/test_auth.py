@@ -91,3 +91,30 @@ def test_the_test_tokens_bind_the_configured_boundary() -> None:
     assert settings.TOKEN_STRICT_VALIDATION is True
     assert settings.TOKEN_ISSUER == TEST_ISSUER
     assert settings.TOKEN_AUDIENCE == TEST_AUDIENCE
+
+
+def test_the_typed_tiers_are_the_fresh_path_dependencies() -> None:
+    from typing import get_args
+
+    from ai_gateway.core import deps as core_deps
+
+    expected = {
+        deps.CurrentReader: core_deps.get_current_active_reader,
+        deps.CurrentWriter: core_deps.get_current_active_writer,
+        deps.CurrentAdmin: core_deps.get_current_active_admin,
+        deps.CurrentSuperuser: core_deps.get_current_active_superuser,
+    }
+    for alias, dependency in expected.items():
+        assert get_args(alias)[1].dependency is dependency
+    assert deps.require_superuser is core_deps.get_current_active_superuser
+
+
+@pytest.mark.parametrize("role", ["admin", "writer", "reader", "user"])
+def test_superuser_only_denies_every_lower_role(client: TestClient, role: str) -> None:
+    assert client.get("/superuser", headers=bearer(role)).status_code == 403
+
+
+def test_an_admin_claiming_is_superuser_is_not_a_superuser(client: TestClient) -> None:
+    # The SDK truth table refuses the inconsistent pair before any tier runs.
+    response = client.get("/superuser", headers=bearer("admin", is_superuser=True))
+    assert response.status_code == 403

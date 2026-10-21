@@ -139,14 +139,15 @@ def test_skew_above_the_bound_turns_execution_into_a_typed_503(
     try:
         main.app.include_router(execution.router, prefix=PREFIX)
         response = client.post(
-            f"{PREFIX}/v1/__probe", headers={JOB_CONTEXT_HEADER: "a.b"}
+            f"{PREFIX}{execution.router.prefix}/__probe",
+            headers={JOB_CONTEXT_HEADER: "a.b"},
         )
     finally:
         execution.router.routes.pop()
         main.app.router.routes[:] = [
             r
             for r in main.app.router.routes
-            if getattr(r, "path", "") != f"{PREFIX}/v1/__probe"
+            if getattr(r, "path", "") != f"{PREFIX}{execution.router.prefix}/__probe"
         ]
     assert response.status_code == 503
     assert response.headers["retry-after"] == "30"

@@ -12,47 +12,115 @@ database clocks disagree by more than ``AI_MAX_CLOCK_SKEW_SECONDS``: every
 lease and deadline is a database-clock predicate, so a skewed process answers
 the typed ``503 clock_skew_exceeded`` instead (D-24).
 
-Current state: the job-context verifier does not exist yet, so
-:func:`require_job_context` **fails closed** — every request is refused with
-``401 context_invalid``, whatever it carries. It never reads the
-``Authorization`` header, so a user JWT cannot reach an execution route. The
-verifying implementation replaces its body; the router factory stays.
+:func:`require_job_context`, in order:
+
+1. takes the route's capability from the SDK route table
+   (:data:`ROUTE_CAPABILITIES`); a route outside it is refused, so a new
+   route cannot run before its capability is declared;
+2. authenticates the service client through the ``fastapi-m8`` guard bound to
+   ``AI_SERVICE_CLIENTS`` with that capability's ``execute:`` scope (R-07):
+   ``401 unauthorized`` for a missing, unknown or wrong credential, ``403
+   forbidden_scope`` for a client without the scope;
+3. verifies ``X-AI-Job-Context`` (C-03): ``401 context_missing`` when absent,
+   otherwise ``context_invalid`` / ``context_expired``.
+
+It returns the :class:`~ai_gateway.core.job_context.JobContextPrincipal`;
+an endpoint receives the same, computed once, through :data:`JobContextDep`.
+The handler binds the request's profile and redeems the context inside the
+transaction that records the execution. The ``Authorization`` header is
+never read, so a user JWT cannot reach an execution route.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import Annotated, Any, Final
 
+from ai_sdk_m8.client import routes
+from ai_sdk_m8.schemas import AiErrorCode, Capability
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+
+from .errors import GatewayError
+from .job_context import JobContextPrincipal
 
 #: Header carrying the compact signed job context.
 JOB_CONTEXT_HEADER = "X-AI-Job-Context"
 
-#: Typed refusal code; the token is never echoed.
-CONTEXT_INVALID = "context_invalid"
+#: The capability of each execution route, from the SDK route table (C-02).
+ROUTE_CAPABILITIES: Final[dict[str, Capability]] = {
+    routes.EXECUTE_OCR.path: Capability.OCR,
+    routes.EXECUTE_OCR_DISPATCH.path: Capability.OCR,
+    routes.EXECUTE_EMBED.path: Capability.EMBEDDING,
+    routes.EXECUTE_RERANK.path: Capability.RERANK,
+    routes.EXECUTE_STRUCTURED_OUTPUT.path: Capability.STRUCTURED_OUTPUT,
+}
 
 
-def require_job_context(request: Request) -> None:
+def route_capability(request: Request) -> Capability:
+    """The capability the matched route executes; refuse an undeclared route."""
+    route = request.scope.get("route")
+    path = getattr(route, "path", "")
+    for template, capability in ROUTE_CAPABILITIES.items():
+        if path.endswith(f"/{template}"):
+            return capability
+    raise GatewayError(AiErrorCode.CONTEXT_INVALID)
+
+
+def authenticate_service_client(
+    guard: Callable[[Request], str], request: Request
+) -> str:
+    """Run a ``fastapi-m8`` service-client guard; answer its refusal typed."""
+    try:
+        return guard(request)
+    except HTTPException as exc:
+        code = (
+            AiErrorCode.FORBIDDEN_SCOPE
+            if exc.status_code == status.HTTP_403_FORBIDDEN
+            else AiErrorCode.UNAUTHORIZED
+        )
+        raise GatewayError(code) from None
+
+
+def require_job_context(request: Request) -> JobContextPrincipal:
     """
-    Refuse the request: no job context can be verified yet.
+    Authenticate the service client and verify its job context.
 
     Parameters
     ----------
     request
-        The incoming request. Only its job-context header would be consulted;
-        the ``Authorization`` header is never read here.
+        The incoming request. Only the service-client and job-context
+        headers are read; the ``Authorization`` header never is.
+
+    Returns
+    -------
+    JobContextPrincipal
+        The verified context, bound to its presenter and the route's
+        capability; not yet redeemed.
 
     Raises
     ------
-    HTTPException
-        Always ``401`` with the ``context_invalid`` code.
+    GatewayError
+        Every refusal, typed (see the module docstring).
 
     """
-    del request
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail={"code": CONTEXT_INVALID},
+    from ai_gateway.core.deps import (  # noqa: PLC0415 - built once at import
+        execution_client_guards,
+        job_contexts,
     )
+
+    capability = route_capability(request)
+    client_id = authenticate_service_client(
+        execution_client_guards[capability], request
+    )
+    return job_contexts.verify(
+        request.headers.get(JOB_CONTEXT_HEADER),
+        presenter=client_id,
+        capability=capability,
+    )
+
+
+#: The verified job context of an execution request.
+JobContextDep = Annotated[JobContextPrincipal, Depends(require_job_context)]
 
 
 def require_clock_within_bound() -> None:
@@ -95,3 +163,15 @@ def build_execution_router(**kwargs: Any) -> APIRouter:
         ],
         **kwargs,
     )
+
+
+__all__ = [
+    "JOB_CONTEXT_HEADER",
+    "ROUTE_CAPABILITIES",
+    "JobContextDep",
+    "authenticate_service_client",
+    "build_execution_router",
+    "require_clock_within_bound",
+    "require_job_context",
+    "route_capability",
+]

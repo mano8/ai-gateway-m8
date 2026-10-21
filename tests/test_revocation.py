@@ -44,12 +44,18 @@ def client() -> Iterator[TestClient]:
         INTROSPECTION_URL=INTROSPECTION_URL,
         PRIVATE_API_SECRET="GatewayTests-PrivateApi-ai8gw-Ab12Cd",
         ACCESS_REVOCATION_FAILURE_MODE="fail_closed",
+        # A positive-cache window, so the fresh path has something to bypass.
+        REVOCATION_CACHE_TTL_SECONDS=30,
     )
     auth = build_auth_deps(stateful)
     app = FastAPI()
 
     @app.get("/writer", dependencies=[Depends(auth.get_current_active_writer)])
     def writer() -> dict[str, bool]:
+        return {"ok": True}
+
+    @app.get("/user", dependencies=[Depends(auth.get_current_user)])
+    def user() -> dict[str, bool]:
         return {"ok": True}
 
     with TestClient(app) as test_client:
@@ -86,3 +92,24 @@ def test_an_unreachable_issuer_fails_closed(
     monkeypatch.setattr(httpx.AsyncClient, "post", _unreachable)
     response = client.get("/writer", headers=bearer("writer", subject=SUBJECT))
     assert response.status_code == 503
+
+
+def test_a_revocation_inside_the_positive_cache_window_reaches_the_writer_tier(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The writer tier (user-scope BYOK writes, A-1) never trusts the cache."""
+    active = {
+        "schema_version": "2",
+        "active": True,
+        "user_id": str(SUBJECT),
+        "auth_generation": 1,
+    }
+    headers = bearer("writer", subject=SUBJECT)
+    monkeypatch.setattr(httpx.AsyncClient, "post", _reply(active))
+    assert client.get("/user", headers=headers).status_code == 200
+    # The issuer revokes the session; the positive result is still cached.
+    monkeypatch.setattr(
+        httpx.AsyncClient, "post", _reply({"schema_version": "2", "active": False})
+    )
+    assert client.get("/user", headers=headers).status_code == 200
+    assert client.get("/writer", headers=headers).status_code == 403
