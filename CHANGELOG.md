@@ -67,6 +67,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   too), `delete`, `destroy`, `rewrap`, `refingerprint`, `generations` and
   `health`. The plaintext is a `ResolvedSecret`: redacted when shown, wiped
   when its block ends. One contract test suite runs against every backend.
+- `DatabaseCredentialStore` with the `local` KEK (`T22`): an AES-256-GCM
+  envelope per version, with a fresh data key wrapped under the KEK file and
+  both bound to the C-05 row context; scope-bound HMAC fingerprints;
+  resolution bounded by `AI_CREDENTIAL_RESOLVE_TIMEOUT_SECONDS`; logical
+  delete; destruction that keeps the tombstone; `rewrap` and `refingerprint`.
+  `python -m ai_gateway.credentials generations|rewrap|refingerprint
+  [--verify]` runs the D-23 rotation steps and audits each change.
+- `/health` reports the credential store (KEK probe). The web and scheduler
+  refuse to start while a stored version needs a KEK or fingerprint-key
+  generation the replica does not hold.
 - Published profiles at `v1/profiles` for reader JWTs and `profiles:read`
   service clients: keys, capability, revision, dimensions,
   `embedding_space_id`, `ocr_execution_identity` and `identity_assurance`;
@@ -83,6 +93,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Execution routes live under `v1/execute`, the `ai-sdk-m8` route table's
   prefix. The test environment registers real service clients and issuer
   keys.
+- `cryptography>=48.0.1` is a direct requirement (the envelope uses it); the
+  lock is unchanged except for that annotation.
+- A deployment configured for `vault_transit` or `vault` now refuses to start
+  until those stores land (`T23`, `T24`).
 - Management routes live under `v1` (`v1/admin`, `v1/profiles`), the
   `ai-sdk-m8` route table's paths, instead of `/manage`.
 - The route walk in the tests uses `fastapi.routing.iter_route_contexts`,

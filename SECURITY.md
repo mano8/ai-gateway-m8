@@ -58,6 +58,35 @@ table (`ruff` `TID251` and a grep test).
   ends, however it ends. The wipe is best effort: a `str` copy handed to the
   HTTP client cannot be erased by Python.
 
+**Envelope (database backend).** Each version is sealed with AES-256-GCM
+under a fresh random 256-bit data key and a random 96-bit nonce. The data key
+is wrapped under the KEK with AES-256-GCM. Both are bound to the same
+additional data: the length-prefixed `credential_id`, `version`,
+`provider_id`, `scope_type`, `tenant_id` and `owner_user_id`. Ciphertext
+moved to another row, a truncated tag, a changed scope or a KEK generation
+that is not configured therefore never decrypts, and each answers
+`credential_unavailable`. AES-GCM authenticates before it releases anything,
+so no partial plaintext is returned. A database dump holds ciphertext and
+wrapped keys only.
+
+**Keys.** The KEK and the fingerprint key are separate 32-byte files, read
+once, mode-checked and never taken from an environment variable. A row
+records the generation it needs as a purpose-tagged digest label, never the
+key itself. A replica refuses to start while any stored row needs a
+generation it does not hold. A rotation re-wraps data keys without touching
+ciphertext (`rewrap`), and `--verify` proves no row remains under the old
+generation before the key is removed.
+
+**Fingerprints.** A fingerprint is HMAC-SHA256 under the fingerprint key over
+the credential's scope and the secret. It can only detect the same key twice
+within one tenant's or one user's scope. The same key in two scopes has two
+unrelated fingerprints, so nothing can link them. Fingerprints are never
+returned.
+
+**Resolution failures** answer `credential_unavailable` and are logged by
+exception type only. A slow database is cut off after
+`AI_CREDENTIAL_RESOLVE_TIMEOUT_SECONDS`.
+
 ### Job-context forgery, replay and substitution
 
 A context is accepted only when all of these hold, and every refusal is a

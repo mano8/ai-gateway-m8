@@ -184,6 +184,33 @@ pip-compile --generate-hashes --no-emit-index-url --no-strip-extras \
   --output-file=requirements_prod.lock requirements_prod.txt
 ```
 
+## Credential storage and key rotation
+
+The `database` backend with a `local` KEK stores each credential version as
+an AES-256-GCM envelope in `ai_db`. Every version gets a fresh data key, which
+is wrapped by the KEK file and bound to the version's row context. The
+`vault_transit` KEK (`T23`) and the `vault` KV backend (`T24`) are not served
+yet, and a deployment configured for them refuses to start. The web and
+scheduler run-modes also refuse to start while a stored version needs a KEK
+or fingerprint-key generation this replica does not hold, and they name it.
+
+Rotate a key in the D-23 order:
+
+1. Deploy the new key to every replica as decrypt-only
+   (`AI_CREDENTIAL_KEK_PREVIOUS_FILES`, or
+   `AI_CREDENTIAL_FINGERPRINT_PREVIOUS_KEY_FILE`).
+2. Switch the active key on every replica.
+3. Check `/meta`: every replica must report the new generation.
+4. Run `python -m ai_gateway.credentials rewrap` (or `refingerprint`).
+5. Run the same command with `--verify`, which exits `1` while any row is
+   still under an older generation.
+6. Only then remove the old key, into offline escrow until the backup
+   retention horizon has passed.
+
+`python -m ai_gateway.credentials generations` prints the rows per
+generation. Each command prints generation labels and counts only, and each
+change is audited.
+
 ## Deployment
 
 Compose stacks will live under `docker_compose/`; none ships yet. Images are
