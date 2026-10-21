@@ -15,7 +15,8 @@ fleet's services.
 > at boot, `/meta` reports the gateway's ratified values, and `/health` checks
 > the database and the application–database clock skew. Execution requests
 > are authenticated and their job contexts verified; no execution route is
-> served yet.
+> served yet. The superuser registry (providers, models, profiles, global
+> bindings) and the published-profile view are served.
 
 ## Architecture
 
@@ -46,6 +47,36 @@ fleet's services.
   handler binds the request's profile and redeems `(iss, jti)` once, in the
   transaction that records the execution, with `exp` re-asserted on the
   database clock.
+
+## Management routes
+
+Paths are the `ai-sdk-m8` route table's, under `{API_PREFIX}`:
+
+| Routes | Who | What |
+| --- | --- | --- |
+| `v1/admin/providers`, `v1/admin/models`, `v1/admin/profiles`, `v1/admin/bindings` | superuser | providers, models, profiles with their revisions, and global bindings; every write audited |
+| `v1/profiles`, `v1/profiles/{profile_key}` | reader JWT, or a `profiles:read` service client | the published profiles |
+
+- **Providers.** `base_url` passes the static destination check on every
+  write. `boundary` is fixed. The endpoint (`base_url`, `provider_type`,
+  `auth_type`, `auth_header_name`) is frozen at first use, and a change is a
+  new provider row. `enabled=false` is the emergency stop.
+- **Models.** `execution_identity = h(provider_id, external_model_id,
+  model_revision)` (C-07) is derived by the gateway. From the first
+  reservation, the identity fields and `model_version_label` are frozen and
+  `capabilities` may only shrink. A capability that a binding relies on is
+  never removed.
+- **Profiles.** Execution-affecting configuration lives in immutable
+  revisions. A changed `execution_config` adds a revision and moves
+  `current_revision`; its hash is `SHA-256(JCS(execution_config))`.
+- **Global bindings.** A binding names a model that carries the profile's
+  capability, and a global credential of that model's provider unless the
+  provider takes none. A global binding cannot fall through.
+- **Published profiles.** A profile is published when it has a global
+  binding. Embedding profiles carry `dimensions` and `embedding_space_id =
+  h(provider_id, external_model_id, model_revision, dimensions,
+  execution_config_hash)`. OCR profiles carry the model's
+  `ocr_execution_identity`.
 - **Own database.** PostgreSQL `ai_db` with its own `alembic_version_ai`
   table. Migrations are packaged with the image. Two roles: `ai_owner` owns
   the schema and is used only by `ai-migrate`; `ai_runtime` (web and

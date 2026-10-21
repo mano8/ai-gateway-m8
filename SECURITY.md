@@ -90,11 +90,35 @@ closing it needs connect-time destination enforcement (an egress proxy), a
 named follow-on. These rules bind the gateway's own code only: code running
 inside a compromised gateway is not constrained by them.
 
+**Frozen endpoints.** Only the superuser registers providers. A provider's
+`boundary` never changes. Its `base_url`, `provider_type`, `auth_type` and
+`auth_header_name` freeze at first use (the first credential that references
+it, or its first outbound request), so a stored credential is never sent to
+an endpoint other than the one it was stored against. The controller refuses
+the change with `409`, and a database trigger refuses it again when the
+controller is bypassed. A credential header name is a lower-case `x-…` name
+or `api-key`, never `x-forwarded-`, `x-internal-` or `x-ai-`, so hop-by-hop,
+routing and gateway headers cannot carry a key.
+
 ### Prompt injection and untrusted provider output
 
 ### Denial of wallet and resource exhaustion
 
 ### Logging, metrics and error disclosure
+
+Every privileged change (providers, models, profiles, bindings) writes an
+`ai_admin_audit` row in the same transaction. The row records the actor's id
+and role, the target, and before/after values, never a secret, within the
+table's 4 KiB bound: long values are replaced by their SHA-256. After the
+commit, each row is also logged as one `ai_gateway.audit` event, so a restore
+that rewinds `ai_db` does not erase the record of later changes. A change
+that rolls back is not logged. The runtime role can insert and read audit
+rows but never update or delete them.
+
+Readers and `profiles:read` service clients see the published profiles only:
+keys, capability, revision, dimensions, `embedding_space_id`,
+`ocr_execution_identity` and `identity_assurance`. They never see a
+credential, a provider or its `base_url`.
 
 ### Supply chain and image provenance
 

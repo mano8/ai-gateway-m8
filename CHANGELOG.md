@@ -55,6 +55,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   client (`azp`), the route's capability and the recorded installation
   (`aud`). `redeem_job_context` counts `(iss, jti)` once, atomically, with
   `exp` asserted on the database clock. Refusals are typed `AiError` answers.
+- The superuser registry (`T18`) under `v1/admin`: providers (static
+  destination check, boundary fixed, endpoint frozen at first use), models
+  (derived C-07 `execution_identity`, identity frozen and capabilities
+  shrink-only from the first reservation), profiles with immutable revisions,
+  and global bindings. Every write is audited in `ai_admin_audit`, and each
+  row is logged as an `ai_gateway.audit` event once the change commits.
+- Published profiles at `v1/profiles` for reader JWTs and `profiles:read`
+  service clients: keys, capability, revision, dimensions,
+  `embedding_space_id`, `ocr_execution_identity` and `identity_assurance`;
+  never a credential or `base_url`.
 
 ### Changed
 
@@ -67,6 +77,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Execution routes live under `v1/execute`, the `ai-sdk-m8` route table's
   prefix. The test environment registers real service clients and issuer
   keys.
+- Management routes live under `v1` (`v1/admin`, `v1/profiles`), the
+  `ai-sdk-m8` route table's paths, instead of `/manage`.
+- The route walk in the tests uses `fastapi.routing.iter_route_contexts`,
+  because FastAPI 0.143 no longer flattens included routers into
+  `app.routes`. The earlier execution-route check was vacuous.
 
 ## [0.1.0] - 2026-10-18
 
