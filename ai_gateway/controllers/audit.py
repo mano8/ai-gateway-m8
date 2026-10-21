@@ -24,7 +24,7 @@ from typing import Final
 
 from sqlalchemy import Connection, Engine, insert
 
-from ai_gateway.db_models.audit import ai_admin_audit
+from ai_gateway.db_models.audit import ai_admin_audit, ai_credential_audit
 from fastapi_m8 import UserModel
 
 logger = logging.getLogger("ai_gateway.audit")
@@ -111,10 +111,33 @@ class AuditedTransaction:
         self.connection.execute(insert(ai_admin_audit).values(**values))
         self._events.append({"trail": "admin", **values})
 
+    def credential(
+        self,
+        actor: Actor,
+        action: str,
+        credential_id: object,
+        scope: Mapping[str, object],
+        metadata: Mapping[str, object],
+    ) -> None:
+        """Insert one ``ai_credential_audit`` row (never the secret)."""
+        values: dict[str, object] = {
+            "action": action,
+            "actor_kind": actor.kind,
+            "actor_id": actor.id,
+            "actor_role": actor.role,
+            "credential_id": credential_id,
+            "scope_type": scope["scope_type"],
+            "tenant_id": scope["tenant_id"],
+            "owner_user_id": scope["owner_user_id"],
+            "metadata": bound_metadata(metadata),
+        }
+        self.connection.execute(insert(ai_credential_audit).values(**values))
+        self._events.append({"trail": "credential", **values})
+
     def emit(self) -> None:
         """Log every recorded event; called only after the commit."""
         for event in self._events:
-            logger.info("audit %s", json.dumps(event, sort_keys=True))
+            logger.info("audit %s", json.dumps(event, sort_keys=True, default=str))
         self._events.clear()
 
 

@@ -239,6 +239,48 @@ class DatabaseCredentialStore:
             credential, secret.get_secret_value().encode("utf-8")
         )
 
+    def duplicate_in_scope(
+        self, connection: Connection, credential: CredentialIdentity, secret: SecretStr
+    ) -> bool:
+        """
+        Whether another non-deleted credential of the same scope holds ``secret``
+        as its current version.
+
+        Fingerprints are scope-bound, so only this scope's rows can match; the
+        check compares under every configured fingerprint generation.
+        """
+        candidates = self.fingerprints(credential, secret)
+        match = sa.or_(
+            *(
+                sa.and_(
+                    _V.c.fingerprint_key_version == version, _V.c.fingerprint == value
+                )
+                for version, value in candidates.items()
+            )
+        )
+        scope = sa.and_(
+            _C.c.scope_type == credential.scope_type.value,
+            _C.c.tenant_id.is_not_distinct_from(credential.tenant_id),
+            _C.c.owner_user_id.is_not_distinct_from(credential.owner_user_id),
+        )
+        statement = (
+            sa.select(_V.c.credential_id)
+            .join(
+                _C,
+                sa.and_(
+                    _C.c.id == _V.c.credential_id, _C.c.current_version == _V.c.version
+                ),
+            )
+            .where(
+                scope,
+                match,
+                _C.c.id != credential.credential_id,
+                _C.c.status != CredentialStatus.DELETED.value,
+            )
+            .limit(1)
+        )
+        return connection.execute(statement).first() is not None
+
     def delete(self, connection: Connection, credential_id: UUID) -> None:
         """Logical deletion; the material stays until D-43 allows destruction."""
         connection.execute(

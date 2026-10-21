@@ -14,7 +14,6 @@ the tenant and user scopes are ``T20a``'s routes over the same rules.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
 from typing import Any
 
 import sqlalchemy as sa
@@ -42,35 +41,7 @@ from ai_gateway.db_models.registry import (
 from .audit import Actor, AuditedTransaction
 from .errors import Conflict, Invalid, NotFound
 from .registry import Row
-
-
-@dataclass(frozen=True)
-class BindingScope:
-    """The scope a binding route acts in, taken from the route and token."""
-
-    scope_type: ScopeType
-    tenant_id: uuid.UUID | None = None
-    owner_user_id: uuid.UUID | None = None
-
-    def where(self, table: sa.Table) -> sa.ColumnElement[bool]:
-        """Rows of ``table`` in exactly this scope."""
-        return sa.and_(
-            table.c.scope_type == self.scope_type.value,
-            table.c.tenant_id.is_not_distinct_from(self.tenant_id),
-            table.c.owner_user_id.is_not_distinct_from(self.owner_user_id),
-        )
-
-    def audit(self) -> dict[str, object]:
-        """The scope as audit metadata."""
-        return {
-            "scope_type": self.scope_type.value,
-            "tenant_id": self.tenant_id,
-            "owner_user_id": self.owner_user_id,
-        }
-
-
-#: The platform's own scope.
-GLOBAL = BindingScope(ScopeType.GLOBAL)
+from .scopes import GLOBAL, Scope
 
 
 def _view_statement() -> sa.Select[Any]:
@@ -85,7 +56,7 @@ def _view(row: Row) -> BindingPublic:
     )
 
 
-def list_bindings(connection: Connection, scope: BindingScope) -> list[BindingPublic]:
+def list_bindings(connection: Connection, scope: Scope) -> list[BindingPublic]:
     """Every binding of ``scope``, by profile key."""
     statement = (
         _view_statement()
@@ -96,7 +67,7 @@ def list_bindings(connection: Connection, scope: BindingScope) -> list[BindingPu
 
 
 def get_binding(
-    connection: Connection, scope: BindingScope, binding_id: uuid.UUID
+    connection: Connection, scope: Scope, binding_id: uuid.UUID
 ) -> BindingPublic:
     """One binding of ``scope``."""
     row = (
@@ -134,7 +105,7 @@ def _target_model(connection: Connection, model_id: uuid.UUID, capability: str) 
 
 def _status(
     connection: Connection,
-    scope: BindingScope,
+    scope: Scope,
     model: Row,
     credential_id: uuid.UUID | None,
 ) -> BindingStatus:
@@ -166,7 +137,7 @@ def _status(
     return BindingStatus.CREDENTIAL_UNAVAILABLE
 
 
-def _check_on_unavailable(scope: BindingScope, value: str) -> None:
+def _check_on_unavailable(scope: Scope, value: str) -> None:
     if (
         scope.scope_type is ScopeType.GLOBAL
         and value == OnUnavailable.FALL_THROUGH.value
@@ -185,7 +156,7 @@ def _audited(row: Row, profile_key: str) -> dict[str, object]:
 
 
 def create_binding(
-    tx: AuditedTransaction, actor: Actor, scope: BindingScope, body: BindingCreate
+    tx: AuditedTransaction, actor: Actor, scope: Scope, body: BindingCreate
 ) -> BindingPublic:
     """Bind a profile in ``scope``; one binding per profile and scope."""
     profile = (
@@ -226,9 +197,7 @@ def create_binding(
     return get_binding(tx.connection, scope, values["id"])
 
 
-def _locked_binding(
-    connection: Connection, scope: BindingScope, binding_id: uuid.UUID
-) -> Row:
+def _locked_binding(connection: Connection, scope: Scope, binding_id: uuid.UUID) -> Row:
     row = (
         connection.execute(
             _view_statement()
@@ -249,7 +218,7 @@ def _locked_binding(
 def update_binding(
     tx: AuditedTransaction,
     actor: Actor,
-    scope: BindingScope,
+    scope: Scope,
     binding_id: uuid.UUID,
     body: BindingUpdate,
 ) -> BindingPublic:
@@ -284,7 +253,7 @@ def update_binding(
 
 
 def delete_binding(
-    tx: AuditedTransaction, actor: Actor, scope: BindingScope, binding_id: uuid.UUID
+    tx: AuditedTransaction, actor: Actor, scope: Scope, binding_id: uuid.UUID
 ) -> None:
     """Remove a binding; the scope then falls through to the next one (C-04)."""
     row = _locked_binding(tx.connection, scope, binding_id)
@@ -295,12 +264,45 @@ def delete_binding(
     tx.admin(actor, "binding.delete", "binding", binding_id, metadata)
 
 
+def sync_credential_status(connection: Connection, credential_id: uuid.UUID) -> int:
+    """
+    Make every binding of a credential follow its availability (T20a).
+
+    In the transaction that changes the credential's status: ``active`` makes
+    its bindings ``active``, anything else (disabled, invalid, deleted,
+    awaiting re-confirmation) ``credential_unavailable``. Bindings are never
+    removed. Returns how many bindings changed.
+    """
+    status = sa.case(
+        (
+            ai_credential.c.status == CredentialStatus.ACTIVE.value,
+            BindingStatus.ACTIVE.value,
+        ),
+        else_=BindingStatus.CREDENTIAL_UNAVAILABLE.value,
+    )
+    current = (
+        sa.select(status)
+        .where(ai_credential.c.id == ai_profile_binding.c.credential_id)
+        .scalar_subquery()
+    )
+    result = connection.execute(
+        sa.update(ai_profile_binding)
+        .where(
+            ai_profile_binding.c.credential_id == credential_id,
+            ai_profile_binding.c.status != current,
+        )
+        .values(status=current, updated_at=sa.func.now())
+    )
+    return int(result.rowcount)
+
+
 __all__ = [
     "GLOBAL",
-    "BindingScope",
+    "Scope",
     "create_binding",
     "delete_binding",
     "get_binding",
     "list_bindings",
+    "sync_credential_status",
     "update_binding",
 ]

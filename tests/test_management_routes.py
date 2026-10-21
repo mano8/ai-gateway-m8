@@ -180,3 +180,26 @@ def test_user_scope_writes_use_the_fresh_writer_tier(client: TestClient) -> None
                 method, _concrete(route.path), headers=bearer(role)
             )
             assert response.status_code == 403, (route.path, role)
+
+
+#: The only query parameters a management route takes.
+QUERY_PARAMETERS = {"v1/admin/user-credentials": {"owner_user_id"}}
+
+
+def _subdependants(dependant: Dependant) -> Iterator[Dependant]:
+    for sub in dependant.dependencies:
+        yield sub
+        yield from _subdependants(sub)
+
+
+@pytest.mark.parametrize("entry", MANAGEMENT, ids=_id)
+def test_no_route_takes_an_unexpected_query_parameter(
+    entry: tuple[str, RouteContext],
+) -> None:
+    # An annotation FastAPI cannot resolve (a postponed one naming a local)
+    # silently becomes a query parameter, and the dependency it named is lost.
+    _, route = entry
+    names = {param.name for param in route.dependant.query_params}
+    for sub in _subdependants(route.dependant):
+        names |= {param.name for param in sub.query_params}
+    assert names <= QUERY_PARAMETERS.get(_relative(route), set())

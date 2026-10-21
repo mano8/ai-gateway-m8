@@ -9,15 +9,20 @@ fresh-revocation path; no route accepts an API-key principal. Paths are the
 * ``v1/admin/…`` — providers, models, profiles and global bindings,
   superuser only (``T18``);
 * ``v1/profiles`` — the published profiles, for readers and for
-  ``profiles:read`` service clients (``T18``).
+  ``profiles:read`` service clients (``T18``);
+* ``v1/admin/credentials``, ``v1/tenants/{tenant_id}/credentials`` and
+  ``v1/me/credentials`` — credentials per scope, and the superuser's
+  ``v1/admin/user-credentials`` stop (``T20``).
 """
 
 from fastapi import APIRouter
 
-from ai_gateway.app.routes import admin, profiles
+from ai_gateway.app.routes import admin, credentials, profiles
 
 router = APIRouter(prefix="/v1")
 router.include_router(admin.router)
+router.include_router(credentials.tenant_router)
+router.include_router(credentials.user_router)
 # The service-client variant must be tried before the reader one.
 router.include_router(profiles.service_router)
 router.include_router(profiles.router)

@@ -102,6 +102,23 @@ class InMemoryCredentialStore:
         digest = hashlib.sha256(f"{scope}|{secret.get_secret_value()}".encode())
         return {"memory-0": digest.hexdigest()}
 
+    def duplicate_in_scope(
+        self, connection: Connection, credential: CredentialIdentity, secret: SecretStr
+    ) -> bool:
+        wanted = self.fingerprints(credential, secret)["memory-0"]
+        for other_id, row in self.rows.items():
+            current = row.material.get(row.current_version or 0)
+            if other_id == credential.credential_id or current is None:
+                continue
+            if row.status == CredentialStatus.DELETED.value:
+                continue
+            held = self.fingerprints(row.identity, SecretStr(current.decode()))[
+                "memory-0"
+            ]
+            if held == wanted:
+                return True
+        return False
+
     def delete(self, connection: Connection, credential_id: UUID) -> None:
         self.rows[credential_id].status = CredentialStatus.DELETED.value
 

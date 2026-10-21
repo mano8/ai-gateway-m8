@@ -29,6 +29,7 @@ from ai_sdk_m8.schemas.management import (
 )
 from fastapi import APIRouter, Depends, Path, status
 
+from ai_gateway.app.routes.credentials import global_router, user_stop_router
 from ai_gateway.controllers import bindings, registry
 from ai_gateway.controllers.audit import Actor, audited_transaction
 from ai_gateway.core.deps import (
@@ -43,6 +44,10 @@ router = APIRouter(
 )
 
 ProfileKeyPath = Annotated[ProfileKey, Path()]
+
+# The platform's own credentials and the user-scope stop (T20).
+router.include_router(global_router)
+router.include_router(user_stop_router)
 
 
 # --- providers -----------------------------------------------------------------

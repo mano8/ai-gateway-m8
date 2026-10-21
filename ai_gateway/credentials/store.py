@@ -146,6 +146,11 @@ class CredentialStore(Protocol):
     ) -> dict[str, str]:
         """``secret``'s fingerprint in ``credential``'s scope, per key generation."""
 
+    def duplicate_in_scope(
+        self, connection: Connection, credential: CredentialIdentity, secret: SecretStr
+    ) -> bool:
+        """Whether another live credential of the scope holds ``secret`` now."""
+
     def delete(self, connection: Connection, credential_id: UUID) -> None:
         """Mark the credential deleted; its material stays until D-43 allows."""
 

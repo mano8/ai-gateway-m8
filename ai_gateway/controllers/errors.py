@@ -43,16 +43,39 @@ class Invalid(ManagementError):
     status_code = 422
 
 
+class Forbidden(ManagementError):
+    """The caller's tier or the deployment's configuration refuses the action."""
+
+    status_code = 403
+
+
+class TooManyRequests(ManagementError):
+    """A per-principal rate limit is spent; retry after ``retry_after``."""
+
+    status_code = 429
+
+    def __init__(self, detail: str, retry_after: int) -> None:
+        super().__init__(detail)
+        self.retry_after = retry_after
+
+
 async def management_error_handler(_request: Request, exc: Exception) -> JSONResponse:
     """FastAPI exception handler for :class:`ManagementError`."""
     assert isinstance(exc, ManagementError)  # nosec B101 - registered for this type
-    return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+    headers = {}
+    if isinstance(exc, TooManyRequests):
+        headers["Retry-After"] = str(exc.retry_after)
+    return JSONResponse(
+        {"detail": exc.detail}, status_code=exc.status_code, headers=headers
+    )
 
 
 __all__ = [
     "Conflict",
+    "Forbidden",
     "Invalid",
     "ManagementError",
     "NotFound",
+    "TooManyRequests",
     "management_error_handler",
 ]
