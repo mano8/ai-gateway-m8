@@ -87,6 +87,26 @@ returned.
 exception type only. A slow database is cut off after
 `AI_CREDENTIAL_RESOLVE_TIMEOUT_SECONDS`.
 
+### Credential access (D-05, A-1, A-2)
+
+- Tenant credentials are managed by an `ADMIN` whose token carries the
+  tenant's `tenant_id`, or by a superuser. A token without `tenant_id`
+  matches no tenant.
+- Personal (user-scope) credentials are managed by their owner at the
+  `WRITER` tier and above. The owner is the JWT `sub` and the tenant is the
+  token's `tenant_id`, both fixed at creation. A matching-tenant `ADMIN` has
+  no access to them.
+- The superuser can only **disable or delete** a user's credential, for
+  incident response and offboarding. No route lets anyone create, rotate,
+  validate, re-enable or bind a key on its owner's behalf, because whoever
+  sets a binding's credential decides where that user's data goes.
+- Every refusal on another scope's credential is the `404` a missing id
+  gets, with the same body. Fingerprints are scope-bound, so storing a key
+  that another scope already holds looks like storing any new key.
+- Every transition writes `ai_credential_audit`, and each row is logged as an
+  `ai_gateway.audit` event after the commit. Neither carries the secret or
+  its fingerprint.
+
 ### Job-context forgery, replay and substitution
 
 A context is accepted only when all of these hold, and every refusal is a

@@ -56,6 +56,10 @@ Paths are the `ai-sdk-m8` route table's, under `{API_PREFIX}`:
 | --- | --- | --- |
 | `v1/admin/providers`, `v1/admin/models`, `v1/admin/profiles`, `v1/admin/bindings` | superuser | providers, models, profiles with their revisions, and global bindings; every write audited |
 | `v1/profiles`, `v1/profiles/{profile_key}` | reader JWT, or a `profiles:read` service client | the published profiles |
+| `v1/admin/credentials` | superuser | the platform's own credentials |
+| `v1/tenants/{tenant_id}/credentials` | an `ADMIN` whose token carries that `tenant_id`, or a superuser | one tenant's credentials |
+| `v1/me/credentials` | `WRITER` and above | the caller's own credentials (owner and tenant from the token) |
+| `v1/admin/user-credentials` | superuser | list, disable or delete a user's credential, nothing else |
 
 - **Providers.** `base_url` passes the static destination check on every
   write. `boundary` is fixed. The endpoint (`base_url`, `provider_type`,
@@ -72,6 +76,18 @@ Paths are the `ai-sdk-m8` route table's, under `{API_PREFIX}`:
 - **Global bindings.** A binding names a model that carries the profile's
   capability, and a global credential of that model's provider unless the
   provider takes none. A global binding cannot fall through.
+- **Credentials.** Each scope has the same verbs: list, create, get, update
+  (name and incident-listing consent), delete (logical), `:rotate`,
+  `:disable`, `:enable`, `:reconfirm` and `remote-artifacts`. A credential
+  outside the caller's scope answers the same `404` as one that never
+  existed. No body can name a provider change, a scope, a tenant or an owner.
+  The same key twice in one scope is refused (`409`). Tenant and user scopes
+  hold at most `AI_MAX_CREDENTIALS_PER_SCOPE` credentials. Creates and
+  rotations are rate-limited per JWT `sub` (20 per minute). While
+  `AI_USER_BYOK_ENABLED` is false, creating, rotating, enabling and
+  re-confirming a user credential answer `403`. A binding follows its
+  credential: unless the credential is `active`, the binding is
+  `credential_unavailable`.
 - **Published profiles.** A profile is published when it has a global
   binding. Embedding profiles carry `dimensions` and `embedding_space_id =
   h(provider_id, external_model_id, model_revision, dimensions,

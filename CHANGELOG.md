@@ -74,6 +74,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   delete; destruction that keeps the tombstone; `rewrap` and `refingerprint`.
   `python -m ai_gateway.credentials generations|rewrap|refingerprint
   [--verify]` runs the D-23 rotation steps and audits each change.
+- Credentials per scope (`T20`) at `v1/admin/credentials`,
+  `v1/tenants/{tenant_id}/credentials` and `v1/me/credentials`: create, list,
+  get, update (name, incident-listing consent), logical delete, `:rotate`,
+  `:disable`, `:enable`, `:reconfirm` and `remote-artifacts`. Scopes come from
+  the route and the token only (D-05, A-1). A foreign or missing id answers
+  one `404`. A same-scope duplicate key is `409`. The per-scope cap holds
+  under concurrency, and creates and rotations are rate-limited per `sub`.
+  Bindings follow their credential's status, and every transition is
+  audited in `ai_credential_audit`. The superuser's `v1/admin/user-credentials`
+  stop lists, disables and deletes user keys only (A-2).
 - `/health` reports the credential store (KEK probe). The web and scheduler
   refuse to start while a stored version needs a KEK or fingerprint-key
   generation the replica does not hold.
@@ -99,6 +109,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   until those stores land (`T23`, `T24`).
 - Management routes live under `v1` (`v1/admin`, `v1/profiles`), the
   `ai-sdk-m8` route table's paths, instead of `/manage`.
+- The route walk also refuses any unexpected query parameter, which is how
+  an annotation FastAPI cannot resolve would show itself.
 - The route walk in the tests uses `fastapi.routing.iter_route_contexts`,
   because FastAPI 0.143 no longer flattens included routers into
   `app.routes`. The earlier execution-route check was vacuous.
