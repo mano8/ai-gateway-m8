@@ -40,6 +40,24 @@ and the data each provider call discloses.
 
 ### Credential storage and decryption
 
+Only the gateway decrypts provider credentials, and only through the
+`CredentialStore` contract (`ai_gateway/credentials/store.py`, C-06). Nothing
+outside `ai_gateway/credentials/` may import or name the credential-version
+table (`ruff` `TID251` and a grep test).
+
+- An execution resolves **exactly** the version its execution row recorded,
+  and only while the credential is `active` and that version is current.
+  Anything else, including a retired version or a disabled, invalid, deleted
+  or re-confirmation-pending credential, is `credential_unavailable`, with no
+  cause given. A binding is never read at that point.
+- Provider-file cleanup has its own entry point. It accepts a retired version
+  and a non-`active` credential while the version's material exists, and is
+  never used to execute.
+- The plaintext exists only inside a `with` block, as a `ResolvedSecret`. Its
+  `repr` and `str` are redacted, and its buffer is overwritten when the block
+  ends, however it ends. The wipe is best effort: a `str` copy handed to the
+  HTTP client cannot be erased by Python.
+
 ### Job-context forgery, replay and substitution
 
 A context is accepted only when all of these hold, and every refusal is a

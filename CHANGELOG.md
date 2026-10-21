@@ -61,6 +61,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   shrink-only from the first reservation), profiles with immutable revisions,
   and global bindings. Every write is audited in `ai_admin_audit`, and each
   row is logged as an `ai_gateway.audit` event once the change commits.
+- The credential-store contract (`T21`, `ai_gateway/credentials/store.py`):
+  `store`, `replace`, `resolve_for_execution` (the recorded, current version
+  of an active credential only), `resolve_for_cleanup` (retired versions
+  too), `delete`, `destroy`, `rewrap`, `refingerprint`, `generations` and
+  `health`. The plaintext is a `ResolvedSecret`: redacted when shown, wiped
+  when its block ends. One contract test suite runs against every backend.
 - Published profiles at `v1/profiles` for reader JWTs and `profiles:read`
   service clients: keys, capability, revision, dimensions,
   `embedding_space_id`, `ocr_execution_identity` and `identity_assurance`;
