@@ -104,14 +104,12 @@ def open_envelope(envelope: Envelope, aad: bytes, kek: KekProvider) -> bytearray
 
 def rewrapped(envelope: Envelope, aad: bytes, kek: KekProvider) -> WrappedKey:
     """The envelope's DEK wrapped again under the active generation."""
+    if envelope.kek_provider != kek.provider:
+        raise EnvelopeError("envelope does not open")
     try:
-        dek = bytearray(kek.unwrap(envelope.wrapped, aad))
+        return kek.rewrap(envelope.wrapped, aad)
     except KekError:
         raise EnvelopeError("envelope does not open") from None
-    try:
-        return kek.wrap(bytes(dek), aad)
-    finally:
-        dek[:] = bytes(len(dek))
 
 
 __all__ = [

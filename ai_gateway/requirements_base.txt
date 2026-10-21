@@ -16,6 +16,10 @@ alembic>=1.18.4
 # floor auth-sdk-m8 already requires.
 cryptography>=48.0.1
 
+# Vault: the transit KEK (T23) and the KV store (T24), on a dedicated
+# requests session (D-20).
+hvac>=2.3.0
+
 pydantic>=2.13.4
 pydantic_settings>=2.14.2
 

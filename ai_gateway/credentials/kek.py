@@ -53,14 +53,17 @@ class KekProvider(Protocol):
     def active_version(self) -> str:
         """The generation new wraps use."""
 
-    def generations(self) -> frozenset[str]:
-        """Every generation this replica can unwrap."""
+    def covers(self, version: str) -> bool:
+        """Whether this replica can unwrap a row of generation ``version``."""
 
     def wrap(self, dek: bytes, aad: bytes) -> WrappedKey:
         """Wrap ``dek`` under the active generation, bound to ``aad``."""
 
     def unwrap(self, wrapped: WrappedKey, aad: bytes) -> bytes:
         """Unwrap ``wrapped``; :class:`KekError` on any failure."""
+
+    def rewrap(self, wrapped: WrappedKey, aad: bytes) -> WrappedKey:
+        """``wrapped``'s data key wrapped under the active generation."""
 
     def probe(self) -> None:
         """Round-trip a constant; :class:`KekError` when it fails."""
@@ -87,9 +90,9 @@ class LocalKekProvider:
         """The generation new wraps use."""
         return self._active
 
-    def generations(self) -> frozenset[str]:
-        """Every configured generation."""
-        return frozenset(self._keys)
+    def covers(self, version: str) -> bool:
+        """Whether ``version`` is a configured generation."""
+        return version in self._keys
 
     def wrap(self, dek: bytes, aad: bytes) -> WrappedKey:
         """Wrap ``dek`` under the active key with a fresh nonce."""
@@ -109,6 +112,14 @@ class LocalKekProvider:
             )
         except (InvalidTag, ValueError):
             raise KekError("the data key does not unwrap") from None
+
+    def rewrap(self, wrapped: WrappedKey, aad: bytes) -> WrappedKey:
+        """Unwrap with the row's generation, wrap under the active one."""
+        dek = bytearray(self.unwrap(wrapped, aad))
+        try:
+            return self.wrap(bytes(dek), aad)
+        finally:
+            dek[:] = bytes(len(dek))
 
     def probe(self) -> None:
         """Wrap and unwrap the probe under the active key (authenticated)."""

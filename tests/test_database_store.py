@@ -520,19 +520,30 @@ def test_start_up_passes_with_every_generation_held() -> None:
     assert prestart.main() == 0
 
 
-def test_only_the_database_and_local_kek_are_served() -> None:
+def test_the_vault_kv_backend_is_not_served_yet() -> None:
     settings = SimpleNamespace(
         AI_CREDENTIAL_STORAGE_BACKEND="vault", AI_CREDENTIAL_KEK_PROVIDER=None
     )
     with pytest.raises(UnsupportedBackendError, match="not served"):
         build_credential_store(settings, deps.db_engine)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("kek", "fingerprint_key", "match"),
+    [(key(), None, "fingerprint key"), (None, key(), "KEK file")],
+)
+def test_the_database_backend_needs_its_key_files(
+    kek: KeyMaterial | None, fingerprint_key: KeyMaterial | None, match: str
+) -> None:
     settings = SimpleNamespace(
         AI_CREDENTIAL_STORAGE_BACKEND="database",
         AI_CREDENTIAL_KEK_PROVIDER="local",
-        kek=None,
-        fingerprint_key=None,
+        kek=kek,
+        previous_keks=(),
+        fingerprint_key=fingerprint_key,
+        previous_fingerprint_key=None,
     )
-    with pytest.raises(UnsupportedBackendError, match="needs a KEK"):
+    with pytest.raises(UnsupportedBackendError, match=match):
         build_credential_store(settings, deps.db_engine)  # type: ignore[arg-type]
 
 

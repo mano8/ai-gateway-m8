@@ -196,7 +196,11 @@ class DatabaseCredentialStore:
         """Insert ``version``'s envelope; its scope-bound fingerprint."""
         identity = identity_of(row)
         plaintext = secret.get_secret_value().encode("utf-8")
-        envelope = seal(plaintext, version_aad(identity, version), self._kek)
+        try:
+            envelope = seal(plaintext, version_aad(identity, version), self._kek)
+        except KekError:
+            # A KEK outage (Vault unreachable) refuses the write; never a fallback.
+            raise credential_unavailable() from None
         fingerprint = self._fingerprints.compute(identity, plaintext)
         connection.execute(
             sa.insert(_V).values(
@@ -458,7 +462,7 @@ class DatabaseCredentialStore:
     def check_coverage(self, connection: Connection) -> None:
         """Refuse to run while a stored row needs a generation not configured."""
         held = self.generations(connection)
-        missing_kek = sorted(set(held.kek) - self._kek.generations())
+        missing_kek = sorted(v for v in held.kek if not self._kek.covers(v))
         missing_fp = sorted(set(held.fingerprint) - self._fingerprints.generations())
         if missing_kek or missing_fp:
             raise KeyCoverageError(
