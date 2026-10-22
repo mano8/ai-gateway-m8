@@ -25,7 +25,7 @@ from ai_gateway.core.spool_check import (
     lock_self_test,
 )
 from ai_sdk_m8.schemas import AiErrorCode
-from conftest import HEALTH_DETAIL
+from conftest import ADMISSION_LIMITS, HEALTH_DETAIL
 
 PREFIX = settings.API_PREFIX
 
@@ -212,6 +212,8 @@ def test_docs_and_openapi_are_absent_under_production(
 ) -> None:
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv("AI_USER_BYOK_ENABLED", "true")
+    for key, value in ADMISSION_LIMITS.items():
+        monkeypatch.setenv(key, value)
     production = Settings(_env_file=None)  # type: ignore[call-arg]
     client = TestClient(main.build_app(production))  # no lifespan needed
     if True:

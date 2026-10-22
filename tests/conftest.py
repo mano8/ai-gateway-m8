@@ -164,6 +164,15 @@ TEST_ENV = {
 for _key, _value in TEST_ENV.items():
     os.environ[_key] = _value
 
+#: Admission bounds a production configuration must set (D-24, ``T27``).
+ADMISSION_LIMITS = {
+    "AI_CLIENT_DAILY_BUDGET_UNITS": "1000000",
+    "AI_TENANT_DAILY_BUDGET_UNITS": "1000000",
+    "AI_USER_DAILY_BUDGET_UNITS": "1000000",
+    "AI_RATE_LIMIT_PER_MINUTE": "600",
+    "AI_MAX_INFLIGHT_PER_CLIENT": "32",
+}
+
 
 # The environment must be complete before ``ai_gateway`` is imported.
 import auth_sdk_m8.utils.paths as _paths_mod  # noqa: E402

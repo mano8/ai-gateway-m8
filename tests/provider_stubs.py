@@ -176,6 +176,7 @@ class StubServer:
         self.requests: list[Received] = []
         self.port = 0
         self._server: asyncio.Server | None = None
+        self._handlers: set[asyncio.Task[None]] = set()
 
     async def __aenter__(self) -> StubServer:
         self._server = await asyncio.start_server(
@@ -187,6 +188,11 @@ class StubServer:
     async def __aexit__(self, *_exc: object) -> None:
         assert self._server is not None
         self._server.close()
+        # A client may leave a connection open (a cancelled handshake): end
+        # every handler rather than wait for its peer.
+        for handler in list(self._handlers):
+            handler.cancel()
+        await asyncio.gather(*self._handlers, return_exceptions=True)
         await self._server.wait_closed()
 
     async def _read(self, reader: asyncio.StreamReader) -> Received:
@@ -200,6 +206,9 @@ class StubServer:
     async def _handle(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
+        task = asyncio.current_task()
+        assert task is not None
+        self._handlers.add(task)
         try:
             while True:
                 received = await self._read(reader)
@@ -211,8 +220,9 @@ class StubServer:
         except (OSError, asyncio.IncompleteReadError, asyncio.LimitOverrunError):
             pass
         finally:
+            self._handlers.discard(task)
             writer.close()
-            with contextlib.suppress(OSError, ssl.SSLError):
+            with contextlib.suppress(OSError, ssl.SSLError, asyncio.CancelledError):
                 await writer.wait_closed()
 
     async def _send(self, writer: asyncio.StreamWriter, reply: Reply) -> None:

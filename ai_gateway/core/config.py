@@ -65,6 +65,15 @@ _KEK_SETTINGS: Final = (
     "AI_CREDENTIAL_KEK_PREVIOUS_FILES",
 )
 
+#: The admission bounds (D-24); required under production/strict (``T27``).
+ADMISSION_SETTINGS: Final = (
+    "AI_CLIENT_DAILY_BUDGET_UNITS",
+    "AI_TENANT_DAILY_BUDGET_UNITS",
+    "AI_USER_DAILY_BUDGET_UNITS",
+    "AI_RATE_LIMIT_PER_MINUTE",
+    "AI_MAX_INFLIGHT_PER_CLIENT",
+)
+
 
 def _split_list(raw: str) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
@@ -621,6 +630,18 @@ class Settings(ConsumerServiceSettings):
             raise ValueError(
                 "AI_MAX_CONCURRENT_SPOOLS x AI_MAX_REQUEST_BYTES exceeds "
                 "AI_OCR_SPOOL_MAX_BYTES"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_admission_bounds(self) -> Settings:
+        """D-24: production and strict mode never run without admission bounds."""
+        if not self.is_production:
+            return self
+        missing = [name for name in ADMISSION_SETTINGS if getattr(self, name) is None]
+        if missing:
+            raise ValueError(
+                f"{', '.join(missing)} must be set under production or strict mode"
             )
         return self
 

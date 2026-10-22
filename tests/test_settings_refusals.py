@@ -13,12 +13,13 @@ from ai_sdk_m8.signed import derive_kid, encode_public_key, public_key_from_seed
 from pydantic import ValidationError
 
 from ai_gateway.core.config import (
+    ADMISSION_SETTINGS,
     SWEEPER_GRACE_SECONDS,
     Settings,
     describe_validation_error,
 )
 from ai_gateway.core.policy import DEFAULT_POLICY, Destination
-from conftest import FINGERPRINT_KEY_FILE, KEK_FILE, write_key_file
+from conftest import ADMISSION_LIMITS, FINGERPRINT_KEY_FILE, KEK_FILE, write_key_file
 from fastapi_m8 import ConsumerCredential
 
 Build = Callable[..., Settings]
@@ -309,11 +310,32 @@ def test_user_byok_must_be_explicit_under_production(build: Build) -> None:
     refused(build, "AI_USER_BYOK_ENABLED must be set", ENVIRONMENT="production")
     refused(build, "AI_USER_BYOK_ENABLED must be set", STRICT_PRODUCTION_MODE="true")
     assert build(
-        ENVIRONMENT="production", AI_USER_BYOK_ENABLED="true"
+        ENVIRONMENT="production", AI_USER_BYOK_ENABLED="true", **ADMISSION_LIMITS
     ).user_byok_enabled
     assert not build(
-        ENVIRONMENT="production", AI_USER_BYOK_ENABLED="false"
+        ENVIRONMENT="production", AI_USER_BYOK_ENABLED="false", **ADMISSION_LIMITS
     ).user_byok_enabled
+
+
+@pytest.mark.parametrize("missing", ADMISSION_SETTINGS)
+def test_admission_bounds_must_be_set_under_production(
+    build: Build, missing: str
+) -> None:
+    limits: dict[str, object] = {**ADMISSION_LIMITS, missing: None}
+    for mode in (
+        {"ENVIRONMENT": "production", "STRICT_PRODUCTION_MODE": "false"},
+        {"ENVIRONMENT": "local", "STRICT_PRODUCTION_MODE": "true"},
+    ):
+        refused(
+            build,
+            f"{missing} must be set under production",
+            AI_USER_BYOK_ENABLED="true",
+            **mode,
+            **limits,
+        )
+    # Outside production an unset bound is simply not enforced.
+    relaxed = build(ENVIRONMENT="local", STRICT_PRODUCTION_MODE="false", **limits)
+    assert getattr(relaxed, missing) is None
 
 
 def test_api_key_introspection_is_refused(build: Build) -> None:

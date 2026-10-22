@@ -31,7 +31,13 @@ from fastapi_m8 import (
     create_db_engine,
 )
 
+from ai_gateway.controllers.resolution import ResolutionPolicy
 from ai_gateway.credentials.factory import build_credential_store
+from ai_gateway.execution.limits import ExecutionLimits
+from ai_gateway.execution.service import ExecutionService
+from ai_gateway.providers.breaker import breakers
+from ai_gateway.providers.http import ClientFactory, ClientLimits
+from ai_gateway.providers.registry import ADAPTERS
 
 from .clock import ClockSkewMonitor
 from .config import settings
@@ -70,6 +76,20 @@ db_engine = engine._engine
 destination_policy = DestinationPolicy.from_settings(settings)
 #: The configured credential store (C-06); the only path to credential material.
 credential_store = build_credential_store(settings, engine._engine)
+#: Builds the client of each provider call (D-20), on the process's breakers.
+provider_clients = ClientFactory(
+    destination_policy, ClientLimits.from_settings(settings), breakers
+)
+#: The execution core (D-24): the one path from a verified context to a provider.
+execution_service = ExecutionService(
+    engine._engine,
+    credential_store,
+    provider_clients,
+    ADAPTERS,
+    policy=lambda: ResolutionPolicy.from_settings(settings),
+    limits=lambda: ExecutionLimits.from_settings(settings),
+    breakers=breakers,
+)
 
 #: One service-client guard per capability, each requiring ``execute:<cap>``.
 execution_client_guards: dict[Capability, Callable[[Request], str]] = {
