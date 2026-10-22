@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import secrets
 
-from ai_sdk_m8.schemas import AiError, AiErrorCode
+from ai_sdk_m8.schemas import AiError, AiErrorCode, ProviderStatusClass
+from ai_sdk_m8.schemas.errors import ProviderMetadata
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
@@ -58,10 +59,14 @@ class GatewayError(Exception):
         *,
         status_code: int | None = None,
         retry_after_seconds: int | None = None,
+        provider_status_class: ProviderStatusClass | None = None,
+        provider_metadata: ProviderMetadata | None = None,
     ) -> None:
         self.code = code
         self.status_code = status_code or DEFAULT_STATUS[code]
         self.retry_after_seconds = retry_after_seconds
+        self.provider_status_class = provider_status_class
+        self.provider_metadata = provider_metadata
         super().__init__(code.value)
 
 
@@ -71,6 +76,8 @@ def error_response(error: GatewayError) -> JSONResponse:
         code=error.code,
         request_id=new_request_id(),
         retry_after_seconds=error.retry_after_seconds,
+        provider_status_class=error.provider_status_class,
+        provider_metadata=error.provider_metadata,
     )
     headers = {}
     if error.retry_after_seconds is not None:
