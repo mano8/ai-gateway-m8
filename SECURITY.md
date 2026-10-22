@@ -205,7 +205,62 @@ controller is bypassed. A credential header name is a lower-case `x-…` name
 or `api-key`, never `x-forwarded-`, `x-internal-` or `x-ai-`, so hop-by-hop,
 routing and gateway headers cannot carry a key.
 
+**The provider client** (`ai_gateway/providers/http.py`, D-20). Each provider
+call gets its own client, closed when the call ends, so no connection, header
+or credential is shared between providers:
+
+- redirects are never followed: a `3xx` is `provider_rejected`, and a
+  redirect to `169.254.169.254` sends nothing there;
+- `trust_env=False` on the client **and** its transport: proxy variables,
+  `.netrc`, `SSL_CERT_FILE` and `SSL_CERT_DIR` are ignored; TLS verification
+  is always on, and a test greps the package for any switch that turns it
+  off;
+- an httpx request hook runs the destination guard above on **every**
+  request, on a fresh resolution, and refuses a request to any origin other
+  than the provider's own;
+- paths come from fixed templates per `provider_type`, every segment
+  URL-encoded; query parameters are fixed by the adapter, never taken from a
+  caller;
+- the credential is put only in its validated header, from the call's
+  `ResolvedSecret`; a value that is not printable ASCII is refused rather
+  than sent;
+- request bodies are bounded by `AI_MAX_REQUEST_BYTES` before sending;
+  answers are counted on the wire **and** after decoding against
+  `AI_MAX_RESPONSE_BYTES` (`Accept-Encoding: identity` is requested, a
+  `gzip`/`deflate` answer is inflated in steps that never exceed what is
+  still allowed, any other coding is refused), and JSON is parsed with a
+  depth cap and `NaN`/`Infinity` refused;
+- the call runs under `asyncio.timeout_at` at its stored total deadline, and
+  the remaining time is checked again before connecting and before writing:
+  per-chunk read timeouts bound nothing on their own;
+- a per-provider circuit breaker counts transport failures, timeouts and
+  `5xx` only. A `401`/`403` is the credential's outcome and a `429` backs off
+  that credential (`throttled_until` on the database clock, at most
+  `AI_PROVIDER_MAX_BACKOFF_SECONDS`, 60 s when `Retry-After` is absent or
+  unparsable, never shortened), so one tenant's invalid or throttled key opens
+  no breaker for another. Breaker state is per process.
+
+The **DNS-rebinding residual**, measured: with a test CA, a connection that
+lands on a host other than the one the guard resolved fails its TLS
+handshake before any byte is sent unless that host holds a valid certificate
+for the provider's name, in which case it is reached. That last case is the
+stated residual.
+
 ### Prompt injection and untrusted provider output
+
+A provider answer is untrusted input. Adapters only extract values; whether
+they are usable is decided by the shared validator
+(`ai_gateway/providers/outputs.py`), which every result must pass before
+settlement: exactly one vector per input, each of the model's declared
+dimensions, every component finite; rerank indexes in range and unique with
+finite scores; never more OCR pages than were reserved and requested. A
+failed check is `provider_rejected`, and nothing partial is returned.
+
+Failures are closed (D-41): a `ProviderFailure` carries a code, the provider's
+status class, a bounded `Retry-After` and adapter-chosen metadata in the
+closed `provider_metadata` shape. Provider bodies, headers and exception text
+are discarded, never excerpted, so a hostile error body (plain, base64 or
+split across lines) reaches no response, log line or traceback.
 
 ### Denial of wallet and resource exhaustion
 

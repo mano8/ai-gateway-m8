@@ -47,6 +47,18 @@ fleet's services.
   handler binds the request's profile and redeems `(iss, jti)` once, in the
   transaction that records the execution, with `exp` re-asserted on the
   database clock.
+- **Provider client** (`ai_gateway/providers/http.py`, D-20). One
+  `httpx.AsyncClient` per provider call: redirects never followed,
+  `trust_env=False` on the client and its transport (no proxy variables, no
+  `.netrc`, no `SSL_CERT_FILE`), TLS verification always on, no connection
+  retries. Every request re-runs the destination guard on a fresh resolution
+  and must target the provider's own origin; bodies are bounded both ways
+  (`AI_MAX_REQUEST_BYTES`, `AI_MAX_RESPONSE_BYTES` on raw and decoded bytes),
+  JSON is parsed under a depth cap, and the whole call runs under its stored
+  total deadline. A per-provider circuit breaker counts transport failures,
+  timeouts and 5xx only. Adapters (`ai_gateway/providers/base.py`) build fixed
+  routes and extract values; `ai_gateway/providers/outputs.py` validates them
+  before any settlement.
 
 ## Management routes
 

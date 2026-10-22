@@ -112,6 +112,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   service clients: keys, capability, revision, dimensions,
   `embedding_space_id`, `ocr_execution_identity` and `identity_assurance`;
   never a credential or `base_url`.
+- The hardened provider client (`T26`, `ai_gateway/providers/`): one
+  `httpx.AsyncClient` per provider call with redirects refused,
+  `trust_env=False` on the client and its transport, TLS verification on and
+  no connection retries; the destination guard on every request; fixed,
+  URL-encoded routes; the credential in its validated header only; request
+  and response caps (raw and decoded), a JSON depth cap and the call's total
+  deadline; dispatch progress recorded before the first request byte; a
+  per-provider breaker fed by transport failures, timeouts and `5xx` only;
+  `429` cooldowns from a bounded `Retry-After` on the database clock; closed
+  `ProviderFailure`s that keep no provider text. The adapter protocol and the
+  shared output validator (embeddings, rerank hits, OCR pages).
+- `AiError` answers carry the provider status class and closed
+  `provider_metadata` when a provider call failed.
 
 ### Changed
 
