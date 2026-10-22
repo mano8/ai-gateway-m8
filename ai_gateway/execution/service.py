@@ -346,10 +346,13 @@ class ExecutionService:
             if failure.status_class is not None
             else ExecutionStatus.CHARGED_UNCERTAIN
         )
-        credential_id = reservation.resolution.credential_id
+        resolution = reservation.resolution
         cooldown = None
-        if failure.throttled and credential_id is not None:
-            cooldown = (credential_id, failure.retry_after_seconds or 0)
+        if failure.throttled and resolution.credential_id is not None:
+            cooldown = (resolution.credential_id, failure.retry_after_seconds or 0)
+        incident = None
+        if failure.incident is not None:
+            incident = (failure.incident, resolution.model_id)
         await asyncio.to_thread(
             settlement.settle,
             self._engine,
@@ -357,6 +360,7 @@ class ExecutionService:
             status,
             error=failure.code,
             cooldown=cooldown,
+            incident=incident,
         )
 
     def _receipt(

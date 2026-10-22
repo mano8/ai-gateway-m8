@@ -34,6 +34,7 @@ from ai_gateway.core.deps import (
     CurrentSuperuser,
     db_engine,
     destination_policy,
+    model_digests,
     require_superuser,
 )
 
@@ -100,9 +101,10 @@ def list_models() -> list[ModelAdmin]:
 
 @router.post("/models", response_model=ModelAdmin, status_code=status.HTTP_201_CREATED)
 def create_model(body: ModelCreate, user: CurrentSuperuser) -> ModelAdmin:
-    """Register a model."""
+    """Register a model; an Ollama model's digest is read from its provider first."""
+    digest = model_digests.digest(body.provider_id, body.external_model_id)
     with audited_transaction(db_engine) as tx:
-        return registry.create_model(tx, Actor.of_user(user), body)
+        return registry.create_model(tx, Actor.of_user(user), body, digest)
 
 
 @router.get("/models/{model_id}", response_model=ModelAdmin)
@@ -116,9 +118,10 @@ def get_model(model_id: UUID) -> ModelAdmin:
 def update_model(
     model_id: UUID, body: ModelUpdate, user: CurrentSuperuser
 ) -> ModelAdmin:
-    """Change a model."""
+    """Change a model; a renamed Ollama model's digest is read again first."""
+    digest = model_digests.digest_for_update(model_id, body.external_model_id)
     with audited_transaction(db_engine) as tx:
-        return registry.update_model(tx, Actor.of_user(user), model_id, body)
+        return registry.update_model(tx, Actor.of_user(user), model_id, body, digest)
 
 
 # --- profiles ------------------------------------------------------------------

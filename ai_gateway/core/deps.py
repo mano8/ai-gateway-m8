@@ -37,7 +37,8 @@ from ai_gateway.execution.limits import ExecutionLimits
 from ai_gateway.execution.service import ExecutionService
 from ai_gateway.providers.breaker import breakers
 from ai_gateway.providers.http import ClientFactory, ClientLimits
-from ai_gateway.providers.registry import ADAPTERS
+from ai_gateway.controllers.model_identity import DigestReader
+from ai_gateway.providers.registry import ADAPTERS, OLLAMA
 
 from .clock import ClockSkewMonitor
 from .config import settings
@@ -89,6 +90,14 @@ execution_service = ExecutionService(
     policy=lambda: ResolutionPolicy.from_settings(settings),
     limits=lambda: ExecutionLimits.from_settings(settings),
     breakers=breakers,
+)
+#: Reads Ollama model digests for registration and the scheduler (T28).
+model_digests = DigestReader(
+    engine._engine,
+    provider_clients,
+    credential_store,
+    OLLAMA,
+    timeout_seconds=float(settings.AI_PROVIDER_TIMEOUT_SECONDS),
 )
 
 #: One service-client guard per capability, each requiring ``execute:<cap>``.

@@ -16,6 +16,10 @@ established before any request byte could have been written: the
 destination guard or the breaker refused, the credential could not be put
 in a header, the body exceeded its cap, or the transport failed to connect
 (``httpx.ConnectError``, ``httpx.ConnectTimeout``, a TLS handshake failure).
+
+An ``incident`` marks an answer that contradicts the registered model — an
+embedding of another dimension — which settlement also writes to the admin
+audit trail.
 Everything after that point — a timeout, a protocol error, a provider
 answer of any kind — is not a refund, whatever its code.
 """
@@ -23,6 +27,7 @@ answer of any kind — is not a refund, whatever its code.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from enum import StrEnum
 
 from ai_sdk_m8.schemas import AiErrorCode
 from ai_sdk_m8.schemas.errors import ProviderMetadata, ProviderStatusClass
@@ -44,6 +49,12 @@ def class_of(status: int) -> ProviderStatusClass:
     return ProviderStatusClass.SUCCESS
 
 
+class Incident(StrEnum):
+    """A provider answer that contradicts the registered model (audited)."""
+
+    DIMENSION_MISMATCH = "dimension_mismatch"
+
+
 class ProviderFailure(Exception):
     """A provider call failed; only closed, typed facts travel with it."""
 
@@ -56,8 +67,10 @@ class ProviderFailure(Exception):
         before_send: bool = False,
         auth_failure: bool = False,
         metadata: Mapping[str, object] | None = None,
+        incident: Incident | None = None,
     ) -> None:
         self.code = code
+        self.incident = incident
         self.status_class = status_class
         self.retry_after_seconds = retry_after_seconds
         self.before_send = before_send
@@ -93,4 +106,10 @@ def gateway_error(failure: ProviderFailure) -> GatewayError:
     )
 
 
-__all__ = ["ProviderFailure", "class_of", "gateway_error", "refused_before_send"]
+__all__ = [
+    "Incident",
+    "ProviderFailure",
+    "class_of",
+    "gateway_error",
+    "refused_before_send",
+]

@@ -7,8 +7,8 @@ settles the call or returns anything. A failed check is
 ``provider_rejected``; nothing partial is returned.
 
 * embeddings: exactly one vector per input, each of the model's declared
-  dimensions, every component a finite number (``NaN``, ``inf`` and booleans
-  refused);
+  dimensions (another dimension is also an audited incident), every
+  component a finite number (``NaN``, ``inf`` and booleans refused);
 * rerank: each hit's index an integer inside the candidate list, at most
   once, its score finite, no more hits than candidates (or ``top_n``);
 * OCR: at most the pages the gateway reserved and requested, each one of
@@ -24,7 +24,7 @@ from typing import Final
 from ai_sdk_m8.schemas import AiErrorCode, OcrPage, RerankHit, RerankResult
 from ai_sdk_m8.schemas.errors import ProviderStatusClass
 
-from .errors import ProviderFailure
+from .errors import Incident, ProviderFailure
 
 #: A raw hit as an adapter extracted it: (index, score), either possibly bad.
 RawHit = tuple[object, object]
@@ -56,8 +56,15 @@ def embeddings(
         raise rejected()
     checked: list[tuple[float, ...]] = []
     for vector in vectors:
-        if not isinstance(vector, list | tuple) or len(vector) != dimensions:
+        if not isinstance(vector, list | tuple):
             raise rejected()
+        if len(vector) != dimensions:
+            # The provider serves another model than the one registered.
+            raise ProviderFailure(
+                AiErrorCode.PROVIDER_REJECTED,
+                status_class=ProviderStatusClass.SUCCESS,
+                incident=Incident.DIMENSION_MISMATCH,
+            )
         checked.append(tuple(_finite(component) for component in vector))
     return tuple(checked)
 

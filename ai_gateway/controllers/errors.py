@@ -49,6 +49,12 @@ class Forbidden(ManagementError):
     status_code = 403
 
 
+class Unavailable(ManagementError):
+    """A dependency the action needs (a provider, a store) cannot be reached."""
+
+    status_code = 503
+
+
 class TooManyRequests(ManagementError):
     """A per-principal rate limit is spent; retry after ``retry_after``."""
 
@@ -77,5 +83,6 @@ __all__ = [
     "ManagementError",
     "NotFound",
     "TooManyRequests",
+    "Unavailable",
     "management_error_handler",
 ]

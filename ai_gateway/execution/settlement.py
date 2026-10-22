@@ -42,6 +42,7 @@ from ai_sdk_m8.schemas import AiErrorCode, IdentityAssurance, ProviderUsage
 from pydantic import JsonValue
 from sqlalchemy import Connection, Engine, RowMapping
 
+from ai_gateway.controllers.audit import Actor, AuditedTransaction
 from ai_gateway.core.errors import GatewayError
 from ai_gateway.db_models._common import ExecutionStatus
 from ai_gateway.db_models.accounting import ai_client_occupancy, ai_execution, ai_usage
@@ -54,9 +55,11 @@ from ai_gateway.db_models.registry import (
 )
 from ai_gateway.providers.base import ModelRef
 from ai_gateway.providers.cooldown import apply_cooldown
+from ai_gateway.providers.errors import Incident
 from ai_gateway.providers.http import ProviderEndpoint
 
 _E = ai_execution
+_SYSTEM = Actor("system")
 
 #: Rows one sweep transaction settles.
 SWEEP_BATCH: Final = 100
@@ -323,13 +326,15 @@ def settle(
     error: AiErrorCode | None = None,
     usage: ProviderUsage | None = None,
     cooldown: tuple[UUID, int] | None = None,
+    incident: tuple[Incident, UUID] | None = None,
 ) -> bool:
     """
     Settle a dispatched row as ``ok``, ``failed`` or ``charged_uncertain``.
 
     One ``UPDATE … WHERE status = 'dispatching'``: a late answer after a
     sweeper settled the row changes nothing. A provider 429's cooldown is
-    applied to the credential whatever the row's state.
+    applied to the credential, and an incident audited against the recorded
+    model, whatever the row's state.
     """
     where = sa.and_(
         _E.c.id == execution_id, _E.c.status == ExecutionStatus.DISPATCHING.value
@@ -338,9 +343,23 @@ def settle(
     if usage is not None:
         values["provider_usage"] = usage.model_dump(mode="json", exclude_none=True)
     with engine.begin() as connection:
+        audit = AuditedTransaction(connection)
         if cooldown is not None:
             apply_cooldown(connection, *cooldown)
-        return bool(close(connection, where, status=status, error=error, values=values))
+        if incident is not None:
+            reason, model_id = incident
+            audit.admin(
+                _SYSTEM,
+                "model.incident",
+                "model",
+                model_id,
+                {"incident": reason.value, "execution_id": str(execution_id)},
+            )
+        settled = bool(
+            close(connection, where, status=status, error=error, values=values)
+        )
+    audit.emit()
+    return settled
 
 
 def _due(

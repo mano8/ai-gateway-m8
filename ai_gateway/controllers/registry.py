@@ -34,6 +34,7 @@ import sqlalchemy as sa
 from ai_sdk_m8.schemas import (
     AiErrorCode,
     Capability,
+    IdentityAssurance,
     ProfilePublic,
     ProviderBoundary,
 )
@@ -322,31 +323,66 @@ def get_model(connection: Connection, model_id: uuid.UUID) -> ModelAdmin:
     return ModelAdmin.model_validate(dict(row))
 
 
-def create_model(tx: AuditedTransaction, actor: Actor, body: ModelCreate) -> ModelAdmin:
-    """Register a model under an existing provider."""
+def _pinned(values: dict[str, Any], digest: str | None) -> dict[str, Any]:
+    """Record a provider digest as the model's revision (``T28``)."""
+    if digest is None:
+        return values
+    if values["model_revision"] not in (None, digest):
+        raise Invalid("this model's revision is the digest its provider lists")
+    return {
+        **values,
+        "model_revision": digest,
+        "identity_assurance": IdentityAssurance.PROVIDER_DIGEST.value,
+    }
+
+
+def create_model(
+    tx: AuditedTransaction,
+    actor: Actor,
+    body: ModelCreate,
+    digest: str | None = None,
+) -> ModelAdmin:
+    """
+    Register a model under an existing provider.
+
+    ``digest`` is the provider-listed digest the route read for an Ollama
+    model; it becomes ``model_revision`` with ``provider_digest`` assurance.
+    """
     provider = tx.connection.execute(
         sa.select(ai_provider.c.id).where(ai_provider.c.id == body.provider_id)
     ).first()
     if provider is None:
         raise Invalid("provider_id names no provider")
-    values = {
-        "id": uuid.uuid4(),
-        **_fields(body),
-        "execution_identity": execution_identity(
-            body.provider_id, body.external_model_id, body.model_revision
-        ),
-    }
+    values = _pinned({"id": uuid.uuid4(), **_fields(body)}, digest)
+    values["execution_identity"] = execution_identity(
+        body.provider_id, body.external_model_id, values["model_revision"]
+    )
     row = _insert(tx.connection, ai_model, values)
     tx.admin(actor, "model.create", "model", row["id"], {"after": _audited(row)})
     return ModelAdmin.model_validate(dict(row))
 
 
+def _check_digest_pinned(row: Row, changes: dict[str, Any], digest: str | None) -> None:
+    """A provider-digest model's revision is the provider's, never hand-set."""
+    if row["identity_assurance"] != IdentityAssurance.PROVIDER_DIGEST.value:
+        return
+    if {"model_revision", "identity_assurance"} & changes.keys():
+        raise Invalid("this model's revision is the digest its provider lists")
+    if digest is not None and digest != row["model_revision"]:
+        changes["model_revision"] = digest
+
+
 def update_model(
-    tx: AuditedTransaction, actor: Actor, model_id: uuid.UUID, body: ModelUpdate
+    tx: AuditedTransaction,
+    actor: Actor,
+    model_id: uuid.UUID,
+    body: ModelUpdate,
+    digest: str | None = None,
 ) -> ModelAdmin:
-    """Change a model within the C-07 freeze rules."""
+    """Change a model within the C-07 freeze rules (``digest``: a rename's)."""
     row = _locked(tx.connection, ai_model, model_id)
     changes = _changes(body, row)
+    _check_digest_pinned(row, changes, digest)
     _check_frozen_model(row, changes)
     merged = {**row, **changes}
     _check_dimensions(merged)

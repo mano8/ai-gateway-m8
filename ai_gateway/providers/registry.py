@@ -11,8 +11,12 @@ from __future__ import annotations
 from ai_sdk_m8.schemas.management import ProviderType
 
 from .base import ProviderAdapter
+from .ollama import OllamaAdapter
+
+#: The Ollama adapter; the digest reader uses the same instance.
+OLLAMA = OllamaAdapter()
 
 #: Every adapter of this build, by the provider type it speaks.
-ADAPTERS: dict[ProviderType, ProviderAdapter] = {}
+ADAPTERS: dict[ProviderType, ProviderAdapter] = {ProviderType.OLLAMA: OLLAMA}
 
-__all__ = ["ADAPTERS"]
+__all__ = ["ADAPTERS", "OLLAMA"]
