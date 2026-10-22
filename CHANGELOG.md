@@ -125,6 +125,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   shared output validator (embeddings, rerank hits, OCR pages).
 - `AiError` answers carry the provider status class and closed
   `provider_metadata` when a provider call failed.
+- The execution core (`T27`, `ai_gateway/execution/`): `ExecutionService.run`
+  follows the D-24 sequence — the reservation transaction (C-04/D-08
+  resolution, first-use stamps with the identity re-read after them, the
+  identity pin, the `jti` redemption, admission units per signed scope, one
+  rate-window admission per principal, the client's occupancy slot, the
+  `pending` row recording the resolved provider, boundary, model, profile
+  revision, credential version and context `exp`); the material fetch of
+  exactly the recorded version; the marker re-validating everything
+  recorded before any provider I/O; the adapter call under the stored
+  absolute deadline; one compare-and-set settlement from the recorded scopes
+  and budget day. Jobs for embedding, rerank and structured output fix their
+  admission units before dispatch and validate every answer. Sweepers settle
+  expired `pending` rows as `abandoned` and stale `dispatching` rows as
+  `charged_uncertain`.
+- Under `production`/strict the settings refuse to boot without the three
+  daily budgets, the rate limit and the in-flight cap.
 
 ### Changed
 

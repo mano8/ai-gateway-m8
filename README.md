@@ -59,6 +59,17 @@ fleet's services.
   timeouts and 5xx only. Adapters (`ai_gateway/providers/base.py`) build fixed
   routes and extract values; `ai_gateway/providers/outputs.py` validates them
   before any settlement.
+- **Execution core** (`ai_gateway/execution/`, D-24). One call follows the
+  D-24 sequence: a reservation transaction (destination by C-04 with D-08,
+  the model's and provider's first use stamped and the frozen identity
+  re-read, the identity pin, the `jti` redemption, the admission units of
+  every signed scope, one rate-window admission per principal and the
+  client's occupancy slot, all recorded on a `pending` row); the credential
+  material of exactly the recorded version; the marker that re-validates
+  every recorded value and moves the row to `dispatching` before any provider
+  I/O; the adapter call under the stored absolute deadline; one settlement.
+  Uncertain outcomes after the marker are charged, never refunded; the
+  sweepers settle by stored status.
 
 ## Management routes
 
@@ -175,6 +186,10 @@ The settings refuse to boot on any contradiction they can see:
 - a dispatch-context TTL above the context TTL, a credential-resolve timeout
   not below both the reservation and dispatch TTLs, or a skew bound above the
   sweeper grace (30 s);
+- under `production`/strict, any admission bound left unset: the three daily
+  budgets (`AI_CLIENT_`, `AI_TENANT_`, `AI_USER_DAILY_BUDGET_UNITS`),
+  `AI_RATE_LIMIT_PER_MINUTE` and `AI_MAX_INFLIGHT_PER_CLIENT`. Elsewhere an
+  unset bound is not enforced, though every counter is kept;
 - an internal host that is not a lower-case `name:port` pair.
 
 At start, the web and scheduler run-modes also refuse an OCR spool that is not

@@ -264,6 +264,53 @@ split across lines) reaches no response, log line or traceback.
 
 ### Denial of wallet and resource exhaustion
 
+The bounded quantity is **admission units**, fixed before dispatch from the
+request and the recorded profile revision (D-24): input characters for
+embeddings, query plus candidate characters for rerank, input characters
+plus the output cap passed to the provider for structured output, and the
+pages the gateway itself requests for OCR. Provider-reported tokens are
+recorded separately and never settle a charge; no monetary bound is claimed.
+
+- **One reservation transaction** (`ai_gateway/execution/reservation.py`)
+  resolves the destination, redeems the job context, reserves the units of
+  every scope the **signed** context names (`client` always, `tenant` and
+  `user` when present) with `UPDATE … WHERE reserved + used + :units <=
+  :budget`, charges one rate-window admission per principal, takes the
+  client's occupancy slot and records it all on a `pending` row. A refusal
+  rolls everything back. A user is bounded by its own budget, window and the
+  client's slots whoever's credential resolved.
+- **The marker** commits `dispatching` before any provider I/O and
+  re-validates everything recorded: reservation and context unexpired on the
+  database clock, provider enabled at its boundary, model enabled and
+  unflagged, profile enabled at the recorded revision, the recorded version
+  still the current version of an active, unthrottled credential. A change
+  committed before it stops the call; one committed after it does not stop
+  that one call (bounded by `AI_PROVIDER_TOTAL_DEADLINE_SECONDS`).
+- **Settlement** is one compare-and-set on the stored status, from the
+  recorded scope ids and budget day — midnight crossings settle on the day
+  reserved. Only established pre-dispatch outcomes are refunded: anything
+  before the marker, and after it only a transport failure the client
+  guarantees sent no byte, while `first_byte_sent_at` is null (the schema
+  refuses any other refund). A timeout, a transport loss, a cancellation or a
+  crash after the marker is `charged_uncertain`. A late answer after a
+  sweeper settled the row is discarded.
+- **Sweepers** act by stored status: `pending` past
+  `reservation_expires_at` → `abandoned`; `dispatching` past its deadline plus
+  the grace → `charged_uncertain`. Every terminal transition returns the
+  occupancy slot exactly once.
+- Under `production`/strict the gateway refuses to start without every
+  budget, the rate limit and the in-flight cap.
+
+### Credential material on the execution path
+
+The material fetch is the only credential-store I/O of a call, and it fetches
+exactly the `(credential_id, version)` the reservation recorded — a binding
+repointed meanwhile changes nothing. It happens before the marker: a store
+that fails or stalls past `AI_CREDENTIAL_RESOLVE_TIMEOUT_SECONDS` releases the
+reservation (`credential_unavailable`) with no provider request. The
+plaintext lives from that fetch to the end of the adapter call and is wiped
+on every path, a zero-row marker and a cancelled request included.
+
 ### Logging, metrics and error disclosure
 
 Every privileged change (providers, models, profiles, bindings) writes an
