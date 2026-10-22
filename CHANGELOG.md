@@ -151,6 +151,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   models are never reserved or dispatched.
 - An embedding of the wrong dimension is audited against the model
   (`model.incident`).
+- The OpenAI-compatible adapter (`T30`): `/v1/embeddings` (vectors put back
+  in input order only when `data[].index` is exactly `0 … n-1`),
+  `/v1/chat/completions` with a `json_schema` response format, `max_tokens`
+  at the reserved cap and `temperature: 0` (a refusal is rejected),
+  `/v1/rerank` in the Jina/Cohere shape, and `/v1/models` as the probe.
 
 ### Changed
 

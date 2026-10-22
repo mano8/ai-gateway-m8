@@ -59,6 +59,12 @@ fleet's services.
   timeouts and 5xx only. Adapters (`ai_gateway/providers/base.py`) build fixed
   routes and extract values; `ai_gateway/providers/outputs.py` validates them
   before any settlement.
+- **Adapters** (`ai_gateway/providers/registry.py`): `ollama` — `/api/embed`,
+  `/api/chat` with a JSON-schema `format`, `/api/tags`; `openai_compatible` —
+  `/v1/embeddings`, `/v1/chat/completions` with a `json_schema` response
+  format, `/v1/rerank` (the Jina/Cohere shape) for models that declare it,
+  `/v1/models`. Paths are appended to the provider's `base_url`, so an
+  OpenAI-compatible `base_url` names the server root, not its `/v1`.
 - **Execution core** (`ai_gateway/execution/`, D-24). One call follows the
   D-24 sequence: a reservation transaction (destination by C-04 with D-08,
   the model's and provider's first use stamped and the frozen identity
