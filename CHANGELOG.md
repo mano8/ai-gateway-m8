@@ -141,6 +141,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `charged_uncertain`.
 - Under `production`/strict the settings refuse to boot without the three
   daily budgets, the rate limit and the in-flight cap.
+- The Ollama adapter (`T28`): `POST /api/embed` (`truncate: false`), `POST
+  /api/chat` with the request's JSON schema as `format`, `num_predict` set to
+  the reserved output cap and `temperature: 0`, and `GET /api/tags` as the
+  probe. Registering or renaming an Ollama model reads its listed digest into
+  `model_revision` with `identity_assurance = provider_digest` (an unlisted
+  model is `422`, an unreachable provider `503`); `DigestReader.recheck`
+  flags and audits a model whose digest changed or vanished, and flagged
+  models are never reserved or dispatched.
+- An embedding of the wrong dimension is audited against the model
+  (`model.incident`).
 
 ### Changed
 

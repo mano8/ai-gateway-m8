@@ -93,7 +93,13 @@ Paths are the `ai-sdk-m8` route table's, under `{API_PREFIX}`:
   model_revision)` (C-07) is derived by the gateway. From the first
   reservation, the identity fields and `model_version_label` are frozen and
   `capabilities` may only shrink. A capability that a binding relies on is
-  never removed.
+  never removed. An **Ollama** model's `model_revision` is the digest its
+  provider lists at `/api/tags`, read when the model is registered or renamed
+  (`identity_assurance = provider_digest`, never set by hand); a model the
+  provider does not list is refused (`422`), an unreachable provider is
+  `503`. The scheduler re-reads the listing, and a model whose digest
+  changed or vanished is flagged, audited and refused until a new row is
+  registered.
 - **Profiles.** Execution-affecting configuration lives in immutable
   revisions. A changed `execution_config` adds a revision and moves
   `current_revision`; its hash is `SHA-256(JCS(execution_config))`.

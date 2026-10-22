@@ -327,6 +327,27 @@ keys, capability, revision, dimensions, `embedding_space_id`,
 `ocr_execution_identity` and `identity_assurance`. They never see a
 credential, a provider or its `base_url`.
 
+### Model identity (LLM03, D-11)
+
+A model's identity is `execution_identity = h(provider_id, external_model_id,
+model_revision)`, frozen from its first reservation. How much of it the
+provider vouches for is `identity_assurance`, reported to every consumer:
+
+- `provider_digest` — **Ollama**: the gateway reads the digest the provider
+  lists at `/api/tags` when the superuser registers or renames the model and
+  records it as `model_revision`; no one sets it by hand. The scheduler
+  re-reads the listing, and a model whose digest changed or vanished is
+  flagged and audited (`model.flagged`), after which every reservation and
+  every marker refuses it — a silent same-dimension model swap never reaches
+  an index. An unreachable provider or a malformed listing flags nothing.
+- `pinned_snapshot` — a dated, immutable provider model id the superuser
+  registered;
+- `operator_declared` — the operator's statement only.
+
+An embedding of a dimension other than the registered model's is refused as
+`provider_rejected` and audited against the model (`model.incident`,
+`dimension_mismatch`).
+
 ### Supply chain and image provenance
 
 ### Database roles, migrations and restore
