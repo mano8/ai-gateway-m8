@@ -15,7 +15,7 @@ import pytest
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
-from sqlalchemy import Connection, Engine, delete, insert, select, text, update
+from sqlalchemy import Connection, Engine, delete, insert, null, select, text, update
 from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError
 
 import ai_gateway.credentials  # noqa: F401 - registers the version table
@@ -998,6 +998,7 @@ def _drive(c: Connection, world: dict[str, uuid.UUID], target: str) -> uuid.UUID
             "spooled",
             spool_file_created=True,
             spool_expires_at=now + timedelta(minutes=5),
+            ocr_options={"pages": None},
         )
     if target in ("dispatching", "ok", "failed", "charged_uncertain"):
         f.set_status(
@@ -1020,6 +1021,7 @@ def _values_for(target: str) -> dict[str, Any]:
         return {
             "spool_file_created": True,
             "spool_expires_at": now + timedelta(minutes=5),
+            "ocr_options": {"pages": None},
         }
     if target == "dispatching":
         return {
@@ -1163,7 +1165,11 @@ def test_the_full_ocr_lifecycle(runtime: Engine, world: dict[str, uuid.UUID]) ->
             .values(spool_file_created=True)
         )
         f.set_status(
-            c, execution_id, "spooled", spool_expires_at=now + timedelta(minutes=5)
+            c,
+            execution_id,
+            "spooled",
+            spool_expires_at=now + timedelta(minutes=5),
+            ocr_options={"pages": None},
         )
         f.set_status(c, execution_id, "pending", **f.reservation(world, now))
         f.set_status(
@@ -1392,4 +1398,75 @@ def test_an_artifact_pins_its_execution_and_identity(
             .values(credential_version=2)
         ),
         "immutable",
+    )
+
+
+def test_the_ocr_options_are_recorded_by_spooled_and_frozen_after(
+    runtime: Engine, world: dict[str, uuid.UUID]
+) -> None:
+    now = datetime.now(UTC)
+    with runtime.begin() as c:
+        execution_id = _drive(c, world, "receiving")
+        # While receiving, the options may still be recorded.
+        c.execute(
+            update(ai_execution)
+            .where(ai_execution.c.id == execution_id)
+            .values(ocr_options={"pages": [0]}, expected_execution_identity="r1")
+        )
+    refused(
+        runtime,
+        lambda c: f.set_status(
+            c,
+            execution_id,
+            "spooled",
+            spool_file_created=True,
+            spool_expires_at=now + timedelta(minutes=5),
+            ocr_options=null(),
+        ),
+    )
+    refused(
+        runtime,
+        lambda c: f.set_status(
+            c,
+            execution_id,
+            "spooled",
+            spool_file_created=True,
+            spool_expires_at=now + timedelta(minutes=5),
+            ocr_options=["not", "an", "object"],
+        ),
+    )
+    with runtime.begin() as c:
+        f.set_status(
+            c,
+            execution_id,
+            "spooled",
+            spool_file_created=True,
+            spool_expires_at=now + timedelta(minutes=5),
+        )
+    for change in (
+        {"ocr_options": {"pages": [1]}},
+        {"expected_execution_identity": "r2"},
+    ):
+        refused(
+            runtime,
+            lambda c, change=change: c.execute(
+                update(ai_execution)
+                .where(ai_execution.c.id == execution_id)
+                .values(**change)
+            ),
+        )
+
+
+def test_ocr_options_belong_to_ocr_rows_only(
+    runtime: Engine, world: dict[str, uuid.UUID]
+) -> None:
+    with runtime.begin() as c:
+        execution_id = _drive(c, world, "pending")
+    refused(
+        runtime,
+        lambda c: c.execute(
+            update(ai_execution)
+            .where(ai_execution.c.id == execution_id)
+            .values(ocr_options={"pages": None})
+        ),
     )

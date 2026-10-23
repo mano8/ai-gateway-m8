@@ -189,6 +189,7 @@ def spooled(
             .values(
                 status="spooled",
                 spool_file_created=True,
+                ocr_options={"pages": None},
                 spool_expires_at=sa.func.now() + timedelta(minutes=5),
             )
         )

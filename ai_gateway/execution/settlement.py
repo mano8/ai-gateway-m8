@@ -254,7 +254,9 @@ def close(
     Move every row matching ``where`` to the terminal ``status``.
 
     Settles each row's units from its recorded scopes and day and vacates its
-    slot, in the caller's transaction; returns the ids moved.
+    slot, in the caller's transaction; returns the ids moved. A row holding a
+    spool reservation (OCR) becomes ``cleanup_pending``: the reservation is
+    released only once its file is gone (D-45).
     """
     charge = status in (
         ExecutionStatus.OK,
@@ -271,6 +273,7 @@ def close(
                 settled_at=sa.func.now(),
                 occupancy_released_at=sa.func.now(),
                 updated_at=sa.func.now(),
+                cleanup_pending=_E.c.spool_bytes_reserved.is_not(None),
                 **dict(values or {}),
             )
             .returning(

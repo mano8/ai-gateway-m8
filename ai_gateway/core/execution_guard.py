@@ -38,7 +38,10 @@ from typing import Annotated, Any, Final
 
 from ai_sdk_m8.client import routes
 from ai_sdk_m8.schemas import AiErrorCode, Capability
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Security, status
+from fastapi.security import APIKeyHeader
+
+from fastapi_m8 import INTERNAL_CLIENT_HEADER, INTERNAL_TOKEN_HEADER
 
 from .errors import GatewayError
 from .job_context import JobContextPrincipal
@@ -119,6 +122,21 @@ def require_job_context(request: Request) -> JobContextPrincipal:
     )
 
 
+#: The service-client scheme, for the OpenAPI document only (``auto_error``
+#: off: it never refuses — the guards above do). One scheme, because an
+#: OpenAPI requirement per header would read as alternatives.
+SERVICE_CLIENT_SCHEME: Final = APIKeyHeader(
+    name=INTERNAL_CLIENT_HEADER,
+    scheme_name="ServiceClient",
+    description=(
+        f"A registered service client: {INTERNAL_CLIENT_HEADER} with its "
+        f"{INTERNAL_TOKEN_HEADER}, and the signed job context in "
+        f"{JOB_CONTEXT_HEADER}. A user JWT is never accepted."
+    ),
+    auto_error=False,
+)
+
+
 #: The verified job context of an execution request.
 JobContextDep = Annotated[JobContextPrincipal, Depends(require_job_context)]
 
@@ -130,7 +148,9 @@ def require_clock_within_bound() -> None:
     clock.require_within_bound()
 
 
-def build_execution_router(**kwargs: Any) -> APIRouter:
+def build_execution_router(
+    *, gate: Callable[[], None] | None = None, **kwargs: Any
+) -> APIRouter:
     """
     Return a router whose every route runs the execution guards.
 
@@ -138,6 +158,9 @@ def build_execution_router(**kwargs: Any) -> APIRouter:
 
     Parameters
     ----------
+    gate
+        An optional dependency run before both guards — a route family that
+        is not served answers before any credential is read.
     **kwargs
         Forwarded to :class:`fastapi.APIRouter`, except ``dependencies``, which
         this factory owns.
@@ -156,16 +179,14 @@ def build_execution_router(**kwargs: Any) -> APIRouter:
     """
     if "dependencies" in kwargs:
         raise TypeError("execution routers own their dependencies")
-    return APIRouter(
-        dependencies=[
-            Depends(require_clock_within_bound),
-            Depends(require_job_context),
-        ],
-        **kwargs,
-    )
+    guards = [Depends(require_clock_within_bound), Depends(require_job_context)]
+    if gate is not None:
+        guards.insert(0, Depends(gate))
+    return APIRouter(dependencies=[*guards, Security(SERVICE_CLIENT_SCHEME)], **kwargs)
 
 
 __all__ = [
+    "SERVICE_CLIENT_SCHEME",
     "JOB_CONTEXT_HEADER",
     "ROUTE_CAPABILITIES",
     "JobContextDep",

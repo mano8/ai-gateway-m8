@@ -293,6 +293,10 @@ TRIGGER_SQL: list[str] = [
            OR NEW.input_sha256 IS DISTINCT FROM OLD.input_sha256
            OR NEW.input_bytes IS DISTINCT FROM OLD.input_bytes
            OR NEW.ocr_options_hash IS DISTINCT FROM OLD.ocr_options_hash
+           OR (OLD.status <> 'receiving'
+               AND (NEW.ocr_options IS DISTINCT FROM OLD.ocr_options
+                    OR NEW.expected_execution_identity
+                       IS DISTINCT FROM OLD.expected_execution_identity))
            OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
             RAISE EXCEPTION 'an execution''s binding is immutable' USING ERRCODE = 'check_violation';
         END IF;
@@ -1000,6 +1004,8 @@ def upgrade() -> None:
         sa.Column("input_sha256", sa.Text(), nullable=True),
         sa.Column("input_bytes", sa.BigInteger(), nullable=True),
         sa.Column("ocr_options_hash", sa.Text(), nullable=True),
+        sa.Column("ocr_options", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("expected_execution_identity", sa.Text(), nullable=True),
         sa.Column("reserved_units", sa.BigInteger(), nullable=True),
         sa.Column("reservation_day", sa.Date(), nullable=True),
         sa.Column("reservation_expires_at", sa.DateTime(timezone=True), nullable=True),
@@ -1051,7 +1057,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.CheckConstraint(
-            "(capability = 'ocr') = (input_sha256 IS NOT NULL) AND (capability = 'ocr') = (input_bytes IS NOT NULL) AND (capability = 'ocr') = (ocr_options_hash IS NOT NULL)",
+            "(capability = 'ocr') = (input_sha256 IS NOT NULL) AND (capability = 'ocr') = (input_bytes IS NOT NULL) AND (capability = 'ocr') = (ocr_options_hash IS NOT NULL) AND (capability = 'ocr' OR (ocr_options IS NULL AND expected_execution_identity IS NULL)) AND (ocr_options IS NULL OR jsonb_typeof(ocr_options) = 'object')",
             name="ck_ai_execution_ocr_inputs",
         ),
         sa.CheckConstraint(
@@ -1087,7 +1093,7 @@ def upgrade() -> None:
             name="ck_ai_execution_receiving",
         ),
         sa.CheckConstraint(
-            "status <> 'spooled' OR (spool_expires_at IS NOT NULL AND spool_file_created)",
+            "status <> 'spooled' OR (spool_expires_at IS NOT NULL AND spool_file_created AND ocr_options IS NOT NULL)",
             name="ck_ai_execution_spooled",
         ),
         sa.CheckConstraint(

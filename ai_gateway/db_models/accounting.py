@@ -115,6 +115,10 @@ ai_execution = sa.Table(
     sa.Column("input_sha256", sa.Text, nullable=True),
     sa.Column("input_bytes", sa.BigInteger, nullable=True),
     sa.Column("ocr_options_hash", sa.Text, nullable=True),
+    # Phase 1's validated options and pin, recorded at spooled and reused by
+    # :dispatch (which has no body); frozen once the row leaves receiving.
+    sa.Column("ocr_options", postgresql.JSONB, nullable=True),
+    sa.Column("expected_execution_identity", sa.Text, nullable=True),
     sa.Column("reserved_units", sa.BigInteger, nullable=True),
     sa.Column("reservation_day", sa.Date, nullable=True),
     sa.Column("reservation_expires_at", TIMESTAMP, nullable=True),
@@ -181,7 +185,8 @@ ai_execution = sa.Table(
         name="ck_ai_execution_receiving",
     ),
     sa.CheckConstraint(
-        "status <> 'spooled' OR (spool_expires_at IS NOT NULL AND spool_file_created)",
+        "status <> 'spooled' OR (spool_expires_at IS NOT NULL AND spool_file_created"
+        " AND ocr_options IS NOT NULL)",
         name="ck_ai_execution_spooled",
     ),
     sa.CheckConstraint(
@@ -206,7 +211,10 @@ ai_execution = sa.Table(
     sa.CheckConstraint(
         "(capability = 'ocr') = (input_sha256 IS NOT NULL)"
         " AND (capability = 'ocr') = (input_bytes IS NOT NULL)"
-        " AND (capability = 'ocr') = (ocr_options_hash IS NOT NULL)",
+        " AND (capability = 'ocr') = (ocr_options_hash IS NOT NULL)"
+        " AND (capability = 'ocr'"
+        " OR (ocr_options IS NULL AND expected_execution_identity IS NULL))"
+        " AND (ocr_options IS NULL OR jsonb_typeof(ocr_options) = 'object')",
         name="ck_ai_execution_ocr_inputs",
     ),
     sa.CheckConstraint(

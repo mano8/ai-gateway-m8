@@ -15,6 +15,7 @@ from ai_gateway.app.routes import execution
 from ai_gateway.core.config import settings
 from ai_gateway.core.errors import GatewayError, gateway_error_handler
 from ai_gateway.core.execution_guard import (
+    SERVICE_CLIENT_SCHEME,
     JOB_CONTEXT_HEADER,
     ROUTE_CAPABILITIES,
     build_execution_router,
@@ -77,7 +78,34 @@ def test_the_guard_cannot_be_replaced() -> None:
 
 def test_the_shipped_execution_router_carries_the_guard() -> None:
     calls = [d.dependency for d in execution.router.dependencies]
-    assert calls == [require_clock_within_bound, require_job_context]
+    assert calls == [
+        require_clock_within_bound,
+        require_job_context,
+        SERVICE_CLIENT_SCHEME,
+    ]
+
+
+def test_the_ocr_router_answers_its_gate_first() -> None:
+    from ai_gateway.app.routes import ocr
+
+    calls = [d.dependency for d in ocr.router.dependencies]
+    assert calls[:3] == [
+        ocr.require_ocr_enabled,
+        require_clock_within_bound,
+        require_job_context,
+    ]
+
+
+def test_execution_routes_document_only_the_service_client_scheme() -> None:
+    spec = gateway_app.openapi()
+    scheme = spec["components"]["securitySchemes"]["ServiceClient"]
+    assert scheme["type"] == "apiKey" and scheme["in"] == "header"
+    assert scheme["name"] == "X-Internal-Client"
+    assert JOB_CONTEXT_HEADER in scheme["description"]
+    for path, operations in spec["paths"].items():
+        if "/v1/execute/" in path:
+            for operation in operations.values():
+                assert operation["security"] == [{"ServiceClient": []}], path
 
 
 def test_the_shipped_router_serves_the_sdk_execution_prefix() -> None:
