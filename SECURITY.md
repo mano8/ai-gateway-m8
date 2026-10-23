@@ -398,6 +398,18 @@ the reservation of blocks a paused reader or writer still holds, and the
 release happens exactly once. A dispatch context must equal every claim the
 spool recorded, the presenting client included, or nothing is sent.
 
+### Sweepers and recovery (T32)
+
+The sweepers settle by stored status through the same compare-and-set as
+the handler, so a row is settled once and its occupancy slot returned
+once, whichever side gets there first; a dispatched row past its deadline is
+charged, never refunded. Spool cleanup goes through the lock discipline: a
+held lock defers it, a crash between the data unlink and the release, or
+between the release and the lock unlink, is finished on the next pass with
+the reservation released exactly once. A lock that vanished while its
+reservation is held is never released automatically; only the audited
+`spool repair` command releases it.
+
 ### Credential validation (T25)
 
 `:validate` sends one minimal authenticated request with the credential's

@@ -179,6 +179,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   options-hash checks) and `v1/execute/ocr/{spool_id}:dispatch` (the spool
   read under its lock); the OCR family only with `ocr` enabled. The
   execution routes document the `ServiceClient` scheme.
+- The sweepers (`T32`, `ai_gateway/execution/sweepers.py`): expired
+  `ai_job_context_use` rows; `receiving` past its lease and `spooled` past
+  its TTL settled `abandoned`; terminal `cleanup_pending` rows through the
+  D-45 cleaner; orphaned spool and lock files collected under `LOCK_EX`;
+  `python -m ai_gateway.execution spool repair` (audited). Metrics
+  `ai_job_contexts_total{event}` and `ai_reservations_settled_total{outcome}`.
 - `ai_execution.ocr_options` and `expected_execution_identity`, recorded at
   `spooled` and frozen after `receiving` (`0001_initial`, unreleased).
 - `OcrJob` and the `:dispatch` reservation: `spooled → pending` under the

@@ -374,6 +374,18 @@ The command writes an `ai_admin_audit` row with the remote id, the file
 name, the provider's expiry and the evidence, and exits `1` when no parked
 row has that id.
 
+A spool whose lock file vanished while its reservation is held (the
+`spool_lock_missing` warning) keeps its capacity charged until an operator,
+having confirmed no process holds its data file, releases it:
+
+```bash
+python -m ai_gateway.execution spool repair \
+    --id <execution-id> --evidence "<how it was confirmed>"
+```
+
+The release is audited (`spool.repair`), and the next orphan pass removes the
+data file.
+
 ## Deployment
 
 Compose stacks will live under `docker_compose/`; none ships yet. Images are
