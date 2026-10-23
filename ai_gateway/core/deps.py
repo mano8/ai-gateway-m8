@@ -40,6 +40,7 @@ from ai_gateway.execution.service import ExecutionService
 from ai_gateway.providers.breaker import breakers
 from ai_gateway.providers.http import ClientFactory, ClientLimits
 from ai_gateway.controllers.model_identity import DigestReader
+from ai_gateway.controllers.validation import CredentialValidator
 from ai_gateway.providers.registry import OLLAMA, build_adapters
 
 from .clock import ClockSkewMonitor
@@ -115,6 +116,14 @@ artifact_scheduler = ArtifactScheduler(
     provider_clients,
     adapters,
     ArtifactPolicy.from_settings(settings),
+)
+#: Probes a credential for ``:validate`` (T25) through the D-20 client.
+credential_validator = CredentialValidator(
+    engine._engine,
+    credential_store,
+    provider_clients,
+    adapters,
+    timeout_seconds=float(settings.AI_PROVIDER_TIMEOUT_SECONDS),
 )
 #: Reads Ollama model digests for registration and the scheduler (T28).
 model_digests = DigestReader(

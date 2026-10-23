@@ -17,8 +17,9 @@ a *caller* dependency fixes the tier and the scope, never from the body:
 The superuser's only action on a user's credential is ``A-2``'s stop under
 ``v1/admin/user-credentials``: list one user's credentials (metadata only),
 disable one, delete one — no route creates, rotates, validates, re-enables or
-binds one on the owner's behalf. Creates and rotations are rate-limited per
-JWT ``sub``.
+binds one on the owner's behalf. Creates, rotations and validations are
+rate-limited per JWT ``sub``. ``:validate`` (``T25``) probes the provider with
+the current version and counts only authentication failures.
 """
 
 # No ``from __future__ import annotations`` here: the routes are built inside
@@ -34,6 +35,7 @@ from ai_sdk_m8.schemas.management import (
     CredentialPublic,
     CredentialRotate,
     CredentialUpdate,
+    CredentialValidation,
     RemoteArtifactPublic,
 )
 from fastapi import APIRouter, Depends, Query, status
@@ -48,7 +50,7 @@ from ai_gateway.controllers import credentials
 from ai_gateway.controllers.audit import audited_transaction
 from ai_gateway.controllers.ratelimit import charge_credential_write
 from ai_gateway.core.config import settings
-from ai_gateway.core.deps import credential_store, db_engine
+from ai_gateway.core.deps import credential_store, credential_validator, db_engine
 
 
 def credential_router(prefix: str, caller: Callable[..., Caller]) -> APIRouter:
@@ -56,6 +58,7 @@ def credential_router(prefix: str, caller: Callable[..., Caller]) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["credentials"])
     _read_routes(router, caller)
     _write_routes(router, caller)
+    _probe_routes(router, caller)
     _status_routes(router, caller)
     return router
 
@@ -130,6 +133,19 @@ def _write_routes(router: APIRouter, caller: Callable[..., Caller]) -> None:
             return credentials.rotate_credential(
                 tx, c.actor, c.scope, credential_id, body, credential_store
             )
+
+
+def _probe_routes(router: APIRouter, caller: Callable[..., Caller]) -> None:
+    @router.post(
+        "/credentials/{credential_id}:validate", response_model=CredentialValidation
+    )
+    async def validate_credential(
+        credential_id: UUID, c: Caller = Depends(caller)
+    ) -> CredentialValidation:
+        """Probe the provider with the current version (T25)."""
+        c.require_user_byok()
+        charge_credential_write(db_engine, c.subject)
+        return await credential_validator.validate(c.actor, c.scope, credential_id)
 
 
 def _status_routes(router: APIRouter, caller: Callable[..., Caller]) -> None:
