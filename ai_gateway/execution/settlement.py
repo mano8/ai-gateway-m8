@@ -38,6 +38,7 @@ from typing import Final
 from uuid import UUID
 
 import sqlalchemy as sa
+from prometheus_client import Counter
 from ai_sdk_m8.schemas import AiErrorCode, IdentityAssurance, ProviderUsage
 from pydantic import JsonValue
 from sqlalchemy import Connection, Engine, RowMapping
@@ -60,6 +61,11 @@ from ai_gateway.providers.http import ProviderEndpoint
 
 _E = ai_execution
 _SYSTEM = Actor("system")
+
+#: ``ai_reservations_settled_total{outcome}`` (C-13): terminal transitions.
+RESERVATIONS_SETTLED = Counter(
+    "ai_reservations_settled", "Executions settled, by terminal status", ["outcome"]
+)
 
 #: Rows one sweep transaction settles.
 SWEEP_BATCH: Final = 100
@@ -289,6 +295,7 @@ def close(
     for row in rows:
         _settle_units(connection, row, charge=charge)
         vacate(connection, row["client_scope_id"])
+    RESERVATIONS_SETTLED.labels(outcome=status.value).inc(len(rows))
     return [row["id"] for row in rows]
 
 

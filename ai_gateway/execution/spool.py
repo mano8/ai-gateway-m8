@@ -50,7 +50,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from ai_sdk_m8.schemas import AiErrorCode
-from sqlalchemy import Engine
+from sqlalchemy import Connection, Engine
 
 from ai_gateway.core.errors import GatewayError
 from ai_gateway.db_models._common import ExecutionStatus
@@ -117,7 +117,7 @@ def _current(fd: int, path: Path) -> bool:
     )
 
 
-def _open_existing_lock(path: Path, operation: int) -> int | None:
+def open_lock(path: Path, operation: int) -> int | None:
     """Open ``L`` without creating it and lock it; ``None`` when retired."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
@@ -265,7 +265,7 @@ class SpoolReader:
 
     def open(self, input_bytes: int) -> None:
         """Lock, re-validate, re-read the row, then open ``D``; else retired."""
-        self._lock_fd = _open_existing_lock(self._layout.lock(self._id), fcntl.LOCK_SH)
+        self._lock_fd = open_lock(self._layout.lock(self._id), fcntl.LOCK_SH)
         if self._lock_fd is None:
             raise GatewayError(AiErrorCode.CONTEXT_INVALID)
         with self._engine.connect() as connection:
@@ -323,8 +323,28 @@ class SpoolReader:
 # --- the cleaner ----------------------------------------------------------------------
 
 
+def release_reservation(
+    connection: Connection, execution_id: UUID, reserved: int | None
+) -> None:
+    """``cleanup_pending`` off and the bytes returned, in the caller's transaction."""
+    connection.execute(
+        sa.update(_E)
+        .where(_E.c.id == execution_id)
+        .values(
+            cleanup_pending=False,
+            spool_bytes_reserved=None,
+            updated_at=sa.func.now(),
+        )
+    )
+    connection.execute(
+        sa.update(ai_spool_capacity).values(
+            reserved_bytes=ai_spool_capacity.c.reserved_bytes - (reserved or 0)
+        )
+    )
+
+
 def _release(engine: Engine, execution_id: UUID) -> bool:
-    """The exactly-once release: ``cleanup_pending`` off, capacity returned."""
+    """The exactly-once release: only a row still ``cleanup_pending``."""
     with engine.begin() as connection:
         row = connection.execute(
             sa.select(_E.c.spool_bytes_reserved)
@@ -333,20 +353,7 @@ def _release(engine: Engine, execution_id: UUID) -> bool:
         ).first()
         if row is None:
             return False
-        connection.execute(
-            sa.update(_E)
-            .where(_E.c.id == execution_id)
-            .values(
-                cleanup_pending=False,
-                spool_bytes_reserved=None,
-                updated_at=sa.func.now(),
-            )
-        )
-        connection.execute(
-            sa.update(ai_spool_capacity).values(
-                reserved_bytes=ai_spool_capacity.c.reserved_bytes - (row[0] or 0)
-            )
-        )
+        release_reservation(connection, execution_id, row[0])
     return True
 
 
@@ -369,7 +376,7 @@ def clean(layout: SpoolLayout, engine: Engine, execution_id: UUID) -> Cleaned:
     file_created = row[1]
     lock_path = layout.lock(execution_id)
     try:
-        fd = _open_existing_lock(lock_path, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fd = open_lock(lock_path, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         return Cleaned.BUSY  # a live holder still owns the blocks
     if fd is None:
@@ -395,5 +402,7 @@ __all__ = [
     "SpoolReader",
     "capacity_exhausted",
     "clean",
+    "open_lock",
+    "release_reservation",
     "reserved_size",
 ]

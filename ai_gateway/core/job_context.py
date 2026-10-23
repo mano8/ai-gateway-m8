@@ -31,6 +31,7 @@ from datetime import UTC, datetime
 from typing import Final
 
 import sqlalchemy as sa
+from prometheus_client import Counter
 from ai_sdk_m8.jobcontext import JobContextError, JobContextPayload, verify
 from ai_sdk_m8.schemas import AiErrorCode, Capability
 from sqlalchemy import Connection, Engine
@@ -161,6 +162,13 @@ class JobContextVerifier:
         return JobContextPrincipal(presenter, payload)
 
 
+#: ``ai_job_contexts_total{event}`` (C-13): ``redeemed``, ``replayed``,
+#: ``expired`` (counted in the redeeming transaction) and ``swept``.
+JOB_CONTEXTS = Counter(
+    "ai_job_contexts", "Job-context redemptions and sweeps", ["event"]
+)
+
+
 def redeem_job_context(connection: Connection, payload: JobContextPayload) -> None:
     """
     Count one use of ``(iss, jti)``, atomically, on the database clock.
@@ -198,8 +206,10 @@ def redeem_job_context(connection: Connection, payload: JobContextPayload) -> No
         .returning(table.c.uses)
     )
     if connection.execute(statement).first() is not None:
+        JOB_CONTEXTS.labels(event="redeemed").inc()
         return
     still_live = connection.execute(sa.select(live)).scalar_one()
+    JOB_CONTEXTS.labels(event="replayed" if still_live else "expired").inc()
     raise GatewayError(
         AiErrorCode.CONTEXT_REPLAYED if still_live else AiErrorCode.CONTEXT_EXPIRED
     )
