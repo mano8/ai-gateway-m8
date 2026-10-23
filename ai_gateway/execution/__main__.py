@@ -5,6 +5,8 @@ Execution operator commands (D-43, D-45)::
         --id <artifact-id> --evidence <text>
     python -m ai_gateway.execution spool repair \
         --id <execution-id> --evidence <text>
+    python -m ai_gateway.execution execution reconcile \
+        --id <execution-id> --evidence <text>
 
 ``accept-residual`` closes one ``manual_cleanup_required`` row as an
 **accepted residual risk** — never as cleanup — and writes its
@@ -14,7 +16,10 @@ that id. ``spool repair`` releases the spool reservation of a terminal row
 whose lock file vanished while it held one (the ``spool_lock_missing``
 alert), after the operator confirmed no process holds its data file, with
 an ``ai_admin_audit`` row; it exits ``1`` when no such row has that id.
-Nothing secret is read or printed.
+``execution reconcile`` (``T33``) marks one ``charged_uncertain`` row
+reconciled — the charge stays — recording the operator's evidence in
+``ai_admin_audit``; only a reconciled row becomes eligible for retention. It
+exits ``1`` when no unreconciled row has that id. Nothing secret is read or printed.
 """
 
 from __future__ import annotations
@@ -41,6 +46,11 @@ def _parser() -> argparse.ArgumentParser:
     repair = spool_commands.add_parser("repair")
     repair.add_argument("--id", required=True, type=UUID)
     repair.add_argument("--evidence", required=True)
+    executions = groups.add_parser("execution")
+    execution_commands = executions.add_subparsers(dest="command", required=True)
+    reconcile = execution_commands.add_parser("reconcile")
+    reconcile.add_argument("--id", required=True, type=UUID)
+    reconcile.add_argument("--evidence", required=True)
     return parser
 
 
@@ -50,12 +60,17 @@ def main(argv: list[str] | None = None) -> int:
     from ai_gateway.controllers.audit import Actor  # noqa: PLC0415
     from ai_gateway.core.deps import db_engine  # noqa: PLC0415
     from ai_gateway.execution.artifacts import accept_residual  # noqa: PLC0415
+    from ai_gateway.execution.retention import reconcile  # noqa: PLC0415
     from ai_gateway.execution.sweepers import spool_repair  # noqa: PLC0415
 
     if args.group == "spool":
         done = spool_repair(db_engine, args.id, Actor("operator"), args.evidence)
         print(json.dumps({"repaired": done, "id": str(args.id)}))
         missing = "no cleanup_pending row with a missing lock has id %s"
+    elif args.group == "execution":
+        done = reconcile(db_engine, args.id, Actor("operator"), args.evidence)
+        print(json.dumps({"reconciled": done, "id": str(args.id)}))
+        missing = "no unreconciled charged_uncertain row has id %s"
     else:
         done = accept_residual(db_engine, args.id, args.evidence, Actor("operator"))
         print(json.dumps({"accepted": done, "id": str(args.id)}))

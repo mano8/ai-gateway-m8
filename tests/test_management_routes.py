@@ -124,10 +124,16 @@ def client() -> Iterator[TestClient]:
         yield test_client
 
 
+#: Served before the SDK's route table names them (``T33``'s ``GET v1/usage``;
+#: the SDK entry and wire model are a follow-up in ``ai-sdk-m8``).
+GATEWAY_ONLY = {routes.Route("GET", "v1/usage")}
+
+
 def test_every_management_route_is_in_the_sdk_route_table() -> None:
     table = set(routes.all_routes())
     served = {routes.Route(method, _relative(route)) for method, route in MANAGEMENT}
-    assert served <= table, served - table
+    assert served - GATEWAY_ONLY <= table, served - GATEWAY_ONLY - table
+    assert GATEWAY_ONLY <= served
     assert SERVED_SINCE_T18 <= served, SERVED_SINCE_T18 - served
 
 
@@ -183,7 +189,10 @@ def test_user_scope_writes_use_the_fresh_writer_tier(client: TestClient) -> None
 
 
 #: The only query parameters a management route takes.
-QUERY_PARAMETERS = {"v1/admin/user-credentials": {"owner_user_id"}}
+QUERY_PARAMETERS = {
+    "v1/admin/user-credentials": {"owner_user_id"},
+    "v1/usage": {"tenant_id", "days"},
+}
 
 
 def _subdependants(dependant: Dependant) -> Iterator[Dependant]:

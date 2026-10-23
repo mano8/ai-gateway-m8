@@ -64,6 +64,7 @@ from ai_gateway.controllers.resolution import (
     resolve,
 )
 from ai_gateway.core.errors import GatewayError
+from ai_gateway.core.metrics import QUOTA_REJECTIONS
 from ai_gateway.core.identities import embedding_space_id
 from ai_gateway.core.job_context import JobContextPrincipal
 from ai_gateway.db_models._common import ExecutionStatus
@@ -215,6 +216,7 @@ def _reserve_units(connection: Connection, scope: Scope, day: date, units: int) 
             ai_usage.c.reserved + ai_usage.c.used + units <= scope.daily_units
         )
     if connection.execute(statement.returning(ai_usage.c.day)).first() is None:
+        QUOTA_REJECTIONS.labels(scope_type=scope.scope_type).inc()
         retry = int(connection.execute(sa.select(_SECONDS_TO_NEXT_DAY)).scalar_one())
         raise GatewayError(
             AiErrorCode.QUOTA_EXCEEDED, retry_after_seconds=max(1, retry)

@@ -54,6 +54,7 @@ from uuid import UUID
 from ai_sdk_m8.schemas import (
     AiErrorCode,
     Capability,
+    EmbedResult,
     ExecutionReceipt,
     OcrResult,
     ProviderExecution,
@@ -65,6 +66,7 @@ from sqlalchemy import Engine
 from ai_gateway.controllers.resolution import ResolutionPolicy
 from ai_gateway.core.errors import GatewayError
 from ai_gateway.core.job_context import JobContextPrincipal
+from ai_gateway.core import metrics
 from ai_gateway.credentials.store import CredentialStore, ResolvedSecret
 from ai_gateway.db_models._common import ExecutionStatus
 from ai_gateway.providers.base import AdapterCall, ProviderAdapter, require_capability
@@ -140,6 +142,14 @@ def _exit_quietly(context: AbstractContextManager[ResolvedSecret]) -> None:
         context.__exit__(None, None, None)
 
 
+@dataclass
+class _Seen:
+    """What a request learned about itself, for its ``ai_requests`` sample."""
+
+    provider: str = "none"
+    status: str = "error"
+
+
 @dataclass(frozen=True)
 class _Dispatch:
     """The marked destination and the absolute deadline derived from it."""
@@ -179,12 +189,35 @@ class ExecutionService:
         self, principal: JobContextPrincipal, job: ExecutionJob[R]
     ) -> Executed[R]:
         """Execute ``job`` under ``principal``'s verified job context."""
+        seen = _Seen()
+        started = time.monotonic()
+        try:
+            executed = await self._run(principal, job, seen)
+        except GatewayError as error:
+            seen.status = error.code.value
+            raise
+        except BaseException:
+            seen.status = "error"
+            raise
+        finally:
+            labels = {
+                "capability": job.capability.value,
+                "provider_type": seen.provider,
+            }
+            metrics.REQUESTS.labels(status=seen.status, **labels).inc()
+            metrics.REQUEST_SECONDS.labels(**labels).observe(time.monotonic() - started)
+        return executed
+
+    async def _run(
+        self, principal: JobContextPrincipal, job: ExecutionJob[R], seen: _Seen
+    ) -> Executed[R]:
         principal.require_profile(job.profile_key)
         limits = self._limits()
         reservation = await asyncio.to_thread(
             reserve, self._engine, principal, job, policy=self._policy(), limits=limits
         )
         execution_id = reservation.execution_id
+        seen.provider = reservation.resolution.provider_type
         try:
             adapter = self._admissible(reservation, job.capability)
         except ProviderFailure as failure:
@@ -193,9 +226,11 @@ class ExecutionService:
         with ExitStack() as stack:
             secret = await self._material(stack, reservation)
             dispatch = await self._mark(execution_id, limits.total_deadline_seconds)
-            return await self._dispatch(
+            executed = await self._dispatch(
                 principal, reservation, dispatch, adapter, job, secret
             )
+        seen.status = "ok"
+        return executed
 
     # --- before the marker ----------------------------------------------------
 
@@ -212,7 +247,9 @@ class ExecutionService:
         ):
             raise refused_before_send(AiErrorCode.CAPABILITY_UNSUPPORTED)
         breaker = self._breakers.for_provider(resolution.provider_id)
-        if breaker.state is BreakerState.OPEN:
+        state = breaker.state
+        metrics.publish_breaker(resolution.provider_type, state)
+        if state is BreakerState.OPEN:
             raise refused_before_send(AiErrorCode.BREAKER_OPEN)
         return adapter
 
@@ -231,6 +268,7 @@ class ExecutionService:
             resolution.credential_id, resolution.credential_version
         )
         entering = asyncio.ensure_future(asyncio.to_thread(context.__enter__))
+        backend = self._store.backend
         try:
             secret = await asyncio.shield(entering)
         except asyncio.CancelledError:
@@ -244,11 +282,14 @@ class ExecutionService:
             )
             raise
         except GatewayError as error:
+            metrics.CREDENTIAL_RESOLUTION.labels(backend=backend, status="failed").inc()
             await self._release(execution_id, error.code)
             raise
         except Exception:
+            metrics.CREDENTIAL_RESOLUTION.labels(backend=backend, status="failed").inc()
             await self._release(execution_id, AiErrorCode.CREDENTIAL_UNAVAILABLE)
             raise GatewayError(AiErrorCode.CREDENTIAL_UNAVAILABLE) from None
+        metrics.CREDENTIAL_RESOLUTION.labels(backend=backend, status="ok").inc()
         stack.push(context)
         return secret
 
@@ -335,8 +376,24 @@ class ExecutionService:
         if not settled:
             # A sweeper settled the row meanwhile: a late answer is discarded.
             raise GatewayError(AiErrorCode.TIMEOUT)
+        self._record_outcome(reservation, completed)
         receipt = self._receipt(reservation, dispatch.marked, job, completed, signed)
         return Executed(completed.result, receipt)
+
+    def _record_outcome(
+        self, reservation: Reservation, completed: Completed[R]
+    ) -> None:
+        """Count what a settled ``ok`` execution processed (C-13)."""
+        resolution = reservation.resolution
+        breaker = self._breakers.for_provider(resolution.provider_id)
+        metrics.publish_breaker(resolution.provider_type, breaker.state)
+        usage = completed.usage
+        if usage is not None:
+            metrics.TOKENS.labels(direction="input").inc(usage.input_tokens or 0)
+            metrics.TOKENS.labels(direction="output").inc(usage.output_tokens or 0)
+            metrics.OCR_PAGES.inc(usage.pages_processed or 0)
+        if isinstance(completed.result, EmbedResult):
+            metrics.EMBEDDING_INPUTS.inc(len(completed.result.vectors))
 
     def _tracker(
         self, reservation: Reservation, progress: ExecutionProgress
@@ -411,6 +468,12 @@ class ExecutionService:
         progress: ExecutionProgress,
     ) -> None:
         execution_id = reservation.execution_id
+        provider_type = reservation.resolution.provider_type
+        metrics.PROVIDER_ERRORS.labels(
+            provider_type=provider_type, reason=failure.code.value
+        ).inc()
+        breaker = self._breakers.for_provider(reservation.resolution.provider_id)
+        metrics.publish_breaker(provider_type, breaker.state)
         if failure.before_send and not progress.recorded:
             await asyncio.to_thread(
                 settlement.release,
@@ -429,6 +492,7 @@ class ExecutionService:
         cooldown = None
         if failure.throttled and resolution.credential_id is not None:
             cooldown = (resolution.credential_id, failure.retry_after_seconds or 0)
+            metrics.CREDENTIAL_THROTTLED.labels(provider_type=provider_type).inc()
         incident = None
         if failure.incident is not None:
             incident = (failure.incident, resolution.model_id)

@@ -31,6 +31,8 @@ only: ``pending`` past ``reservation_expires_at`` → ``abandoned``;
 
 from __future__ import annotations
 
+import json
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import timedelta
@@ -58,6 +60,8 @@ from ai_gateway.providers.base import ModelRef
 from ai_gateway.providers.cooldown import apply_cooldown
 from ai_gateway.providers.errors import Incident
 from ai_gateway.providers.http import ProviderEndpoint
+
+logger = logging.getLogger("ai_gateway.audit")
 
 _E = ai_execution
 _SYSTEM = Actor("system")
@@ -295,6 +299,21 @@ def close(
     for row in rows:
         _settle_units(connection, row, charge=charge)
         vacate(connection, row["client_scope_id"])
+        # Ids, units and status only — never a content or identity field (S-11).
+        logger.info(
+            "audit %s",
+            json.dumps(
+                {
+                    "trail": "execution",
+                    "execution_id": str(row["id"]),
+                    "status": status.value,
+                    "error_class": None if error is None else error.value,
+                    "units": row["reserved_units"],
+                    "reservation_day": str(row["reservation_day"]),
+                },
+                sort_keys=True,
+            ),
+        )
     RESERVATIONS_SETTLED.labels(outcome=status.value).inc(len(rows))
     return [row["id"] for row in rows]
 
