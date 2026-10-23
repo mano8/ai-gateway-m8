@@ -139,6 +139,8 @@ class Reply:
     chunks: list[bytes] = field(default_factory=lambda: [b"{}"])
     delay: float = 0.0
     content_length: int | None = None
+    #: Close the connection without answering (a lost response).
+    drop: bool = False
 
 
 @dataclass
@@ -226,6 +228,9 @@ class StubServer:
                 await writer.wait_closed()
 
     async def _send(self, writer: asyncio.StreamWriter, reply: Reply) -> None:
+        if reply.drop:
+            writer.transport.abort()
+            raise ConnectionAbortedError("the stub dropped the response")
         length = reply.content_length
         if length is None:
             length = sum(len(chunk) for chunk in reply.chunks)

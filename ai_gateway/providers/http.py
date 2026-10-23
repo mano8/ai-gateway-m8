@@ -38,9 +38,10 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import secrets
 import time
 import zlib
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from typing import Final, Literal, Protocol
@@ -87,6 +88,9 @@ _HEADER_NAME: Final = re.compile(r"(?:x-[a-z0-9-]{1,60}|api-key)")
 # split the header or smuggle another one.
 _HEADER_VALUE: Final = re.compile(r"[\x21-\x7e](?:[\x20-\x7e]{0,8190}[\x21-\x7e])?")
 _ROUTE: Final = re.compile(r"(?:/[A-Za-z0-9._~%:@!$&'()*+,;=-]+)+")
+# A multipart field name, value, file name or media type the gateway sets:
+# no quote, backslash, CR or LF can reach the part headers.
+_FORM_TOKEN: Final = re.compile(r"[A-Za-z0-9._/+-]{1,200}")
 
 #: httpcore trace events: before connecting, before writing a request.
 _CONNECT_EVENTS: Final = frozenset({"connection.connect_tcp.started"})
@@ -245,6 +249,59 @@ def encode_json_body(body: Mapping[str, object], max_bytes: int) -> bytes:
     if len(content) > max_bytes:
         raise refused_before_send(AiErrorCode.REQUEST_TOO_LARGE)
     return content
+
+
+@dataclass(frozen=True)
+class Upload:
+    """One file part and its form fields, for a ``multipart/form-data`` upload."""
+
+    fields: Mapping[str, str]
+    field_name: str
+    file_name: str
+    media_type: str
+    size: int
+    chunks: Callable[[], AsyncIterator[bytes]]
+
+
+def _token(value: str) -> str:
+    if not _FORM_TOKEN.fullmatch(value):
+        raise refused_before_send(AiErrorCode.PROVIDER_REJECTED)
+    return value
+
+
+def multipart_frame(upload: Upload, boundary: str) -> tuple[bytes, bytes]:
+    """The bytes before and after the file content; every token is checked."""
+    parts = [
+        f'--{boundary}\r\nContent-Disposition: form-data; name="{_token(name)}"'
+        f"\r\n\r\n{_token(value)}\r\n"
+        for name, value in upload.fields.items()
+    ]
+    parts.append(
+        f"--{boundary}\r\nContent-Disposition: form-data; "
+        f'name="{_token(upload.field_name)}"; filename="{_token(upload.file_name)}"'
+        f"\r\nContent-Type: {_token(upload.media_type)}\r\n\r\n"
+    )
+    return "".join(parts).encode("ascii"), f"\r\n--{boundary}--\r\n".encode("ascii")
+
+
+async def _multipart_body(
+    head: bytes, upload: Upload, tail: bytes
+) -> AsyncIterator[bytes]:
+    yield head
+    sent = 0
+    try:
+        async for chunk in upload.chunks():
+            sent += len(chunk)
+            if sent > upload.size:
+                break
+            yield chunk
+    except Exception:  # noqa: BLE001 - a source that fails mid-body is typed here
+        raise ProviderFailure(AiErrorCode.PROVIDER_UNREACHABLE) from None
+    if sent != upload.size:
+        # The source changed under the upload: stop rather than send a body
+        # whose length or content differs from what was verified.
+        raise ProviderFailure(AiErrorCode.PROVIDER_UNREACHABLE)
+    yield tail
 
 
 def _rejected() -> ProviderFailure:
@@ -592,6 +649,51 @@ class ProviderHttpClient:
         request = self._build(
             method, path, deadline, json_body, query, secret, progress
         )
+        return await self._send(request, deadline, progress, accept)
+
+    async def upload(
+        self,
+        path: str,
+        upload: Upload,
+        *,
+        deadline: Deadline,
+        secret: ResolvedSecret | None = None,
+        progress: DispatchProgress | None = None,
+        accept: frozenset[int] = frozenset(),
+    ) -> ProviderAnswer:
+        """
+        ``POST`` one file as ``multipart/form-data``, streamed from its source.
+
+        The part's name and media type are the gateway's (never a caller's
+        file name), its size is exact (``Content-Length``, no chunking) and
+        bounded by ``AI_MAX_REQUEST_BYTES``; otherwise as :meth:`request`.
+        """
+        if upload.size > self._limits.max_request_bytes:
+            raise refused_before_send(AiErrorCode.REQUEST_TOO_LARGE)
+        boundary = secrets.token_hex(16)
+        head, tail = multipart_frame(upload, boundary)
+        headers = {
+            "Accept": "application/json",
+            **credential_headers(self._endpoint, secret),
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Content-Length": str(len(head) + upload.size + len(tail)),
+        }
+        request = self._client.build_request(
+            "POST",
+            self._url(path),
+            content=_multipart_body(head, upload, tail),
+            headers=headers,
+            extensions={"trace": _trace(progress, deadline)},
+        )
+        return await self._send(request, deadline, progress, accept)
+
+    async def _send(
+        self,
+        request: httpx.Request,
+        deadline: Deadline,
+        progress: DispatchProgress | None,
+        accept: frozenset[int],
+    ) -> ProviderAnswer:
         if not self._breaker.allow():
             raise refused_before_send(AiErrorCode.BREAKER_OPEN)
         try:
@@ -706,9 +808,11 @@ __all__ = [
     "ProviderAnswer",
     "ProviderEndpoint",
     "ProviderHttpClient",
+    "Upload",
     "credential_headers",
     "encode_json_body",
     "json_depth",
+    "multipart_frame",
     "parse_json",
     "route",
 ]

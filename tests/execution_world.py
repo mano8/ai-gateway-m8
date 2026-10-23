@@ -466,6 +466,8 @@ def service(
     engine: sa.Engine | None = None,
     factory: ClientFactory | None = None,
     breakers: Breakers | None = None,
+    deployment_id: str | None = None,
+    receipts: Any = None,
 ) -> ExecutionService:
     registry = {adapter.provider_type: adapter for adapter in adapters}
     breakers = breakers or Breakers()
@@ -477,6 +479,8 @@ def service(
         policy=lambda: policy,
         limits=lambda: limits,
         breakers=breakers,
+        deployment_id=deployment_id,
+        receipts=receipts,
     )
 
 

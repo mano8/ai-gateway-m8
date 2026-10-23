@@ -14,19 +14,23 @@ Admission units:
 * rerank — the query characters plus every candidate's;
 * structured output — the input characters plus the output cap the gateway
   passes to the provider as its hard limit: the recorded revision's
-  ``max_output_tokens``, or :data:`DEFAULT_MAX_OUTPUT_TOKENS`.
+  ``max_output_tokens``, or :data:`DEFAULT_MAX_OUTPUT_TOKENS`;
+* OCR — the pages of the gateway's own reserved page list, which is also
+  the only page selection the provider is sent (D-24).
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Final, Generic, Protocol, TypeVar
+from typing import Final, Generic, Protocol, TypeVar, cast
 
 from ai_sdk_m8.schemas import (
     Capability,
     EmbedRequest,
     EmbedResult,
+    OcrRequest,
+    OcrResult,
     ProviderUsage,
     RerankRequest,
     RerankResult,
@@ -36,7 +40,12 @@ from ai_sdk_m8.schemas import (
 from pydantic import BaseModel, JsonValue
 
 from ai_gateway.providers import outputs
-from ai_gateway.providers.base import AdapterCall, ProviderAdapter
+from ai_gateway.providers.base import (
+    AdapterCall,
+    DocumentSource,
+    OcrAdapter,
+    ProviderAdapter,
+)
 
 #: The output cap of a structured-output revision that names none.
 DEFAULT_MAX_OUTPUT_TOKENS: Final = 1024
@@ -194,12 +203,52 @@ class StructuredOutputJob:
         )
 
 
+@dataclass(frozen=True)
+class OcrJob:
+    """
+    ``ocr``: at most the reserved pages, each a requested one, in order.
+
+    ``pages`` is the gateway's reserved page list (zero-based, strictly
+    increasing, at most ``AI_MAX_OCR_PAGES``), computed from the verified
+    spool before admission; the response is held to it.
+    """
+
+    request: OcrRequest
+    document: DocumentSource
+    pages: tuple[int, ...]
+    capability: Capability = field(default=Capability.OCR, init=False)
+
+    @property
+    def profile_key(self) -> str:
+        """The request's profile."""
+        return self.request.profile_key
+
+    @property
+    def expected_identity(self) -> str | None:
+        """The pin of the first successful call, when the caller sends one."""
+        return self.request.expected_execution_identity
+
+    def units(self, config: Mapping[str, JsonValue]) -> int:
+        """The reserved pages."""
+        return len(self.pages)
+
+    async def execute(
+        self, adapter: ProviderAdapter, call: AdapterCall
+    ) -> Completed[OcrResult]:
+        """Recognise exactly the reserved pages, then hold the answer to them."""
+        # The core refused any adapter that does not declare ``ocr``.
+        output = await cast(OcrAdapter, adapter).ocr(call, self.document, self.pages)
+        pages = outputs.ocr_pages(output.pages, requested=self.pages)
+        return Completed(OcrResult(pages=pages), output.usage)
+
+
 __all__ = [
     "DEFAULT_MAX_OUTPUT_TOKENS",
     "Admission",
     "Completed",
     "EmbedJob",
     "ExecutionJob",
+    "OcrJob",
     "RerankJob",
     "StructuredOutputJob",
     "output_cap",

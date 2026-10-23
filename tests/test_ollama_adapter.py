@@ -36,7 +36,7 @@ from ai_gateway.db_models.registry import ai_model, ai_provider
 from ai_gateway.providers.errors import ProviderFailure
 from ai_gateway.providers.http import Deadline, ProviderEndpoint
 from ai_gateway.providers.ollama import OllamaAdapter, digest_of, tagged
-from ai_gateway.providers.registry import ADAPTERS, OLLAMA
+from ai_gateway.providers.registry import OLLAMA, build_adapters
 from conftest import bearer
 from execution_world import (
     StubAdapter,
@@ -276,7 +276,8 @@ def test_ollama_serves_no_rerank_and_refuses_it_before_any_request() -> None:
 
 
 def test_the_shipped_registry_serves_ollama_with_one_adapter_instance() -> None:
-    assert ADAPTERS[ProviderType.OLLAMA] is OLLAMA
+    shipped = build_adapters(inline_threshold_bytes=1, file_expiry_seconds=1)
+    assert shipped[ProviderType.OLLAMA] is OLLAMA
     assert OLLAMA.capabilities == frozenset(
         {Capability.EMBEDDING, Capability.STRUCTURED_OUTPUT}
     )

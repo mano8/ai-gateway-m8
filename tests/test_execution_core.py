@@ -1650,11 +1650,11 @@ def test_limits_follow_the_settings(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_the_shipped_service_is_built_once_from_the_settings() -> None:
-    from ai_gateway.providers.registry import ADAPTERS
-
     shipped = deps.execution_service
     assert isinstance(shipped, ExecutionService)
-    assert shipped._adapters is ADAPTERS and shipped._store is deps.credential_store
+    assert shipped._adapters is deps.adapters
+    assert shipped._store is deps.credential_store
+    assert shipped._deployment_id == deps.settings.deployment_id
     assert shipped._limits() == ExecutionLimits.from_settings(deps.settings)
     assert shipped._policy() == ResolutionPolicy.from_settings(deps.settings)
 

@@ -77,6 +77,46 @@ def ordered_vectors(data: list[JsonValue]) -> list[JsonValue]:
     return [by_index[i] for i in range(len(by_index))]
 
 
+async def embed_openai(call: AdapterCall, inputs: Sequence[str]) -> EmbedOutput:
+    """``POST /v1/embeddings`` in the OpenAI shape (shared with Mistral)."""
+    body = {
+        "model": call.model.external_model_id,
+        "input": list(inputs),
+        "encoding_format": "float",
+    }
+    answer = _object((await call.post(EMBEDDINGS, body)).body)
+    vectors = ordered_vectors(_list(answer.get("data")))
+    return EmbedOutput(vectors, _usage(answer))
+
+
+async def structured_openai(
+    call: AdapterCall,
+    text: str,
+    schema_name: str,
+    json_schema: Mapping[str, JsonValue],
+    max_output_tokens: int,
+) -> StructuredOutput:
+    """``POST /v1/chat/completions`` with a ``json_schema`` response format."""
+    body = {
+        "model": call.model.external_model_id,
+        "messages": [{"role": "user", "content": text}],
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {"name": schema_name, "schema": dict(json_schema)},
+        },
+        "max_tokens": max_output_tokens,
+        "temperature": 0,
+    }
+    answer = _object((await call.post(CHAT_COMPLETIONS, body)).body)
+    choices = _list(answer.get("choices"))
+    if not choices:
+        raise rejected()
+    content = _object(_object(choices[0]).get("message")).get("content")
+    if not isinstance(content, str):
+        raise rejected()
+    return StructuredOutput(parse_json(content.encode("utf-8")), _usage(answer))
+
+
 class OpenAiCompatibleAdapter:
     """``provider_type = openai_compatible``: embeddings, structured output, rerank."""
 
@@ -87,14 +127,7 @@ class OpenAiCompatibleAdapter:
 
     async def embed(self, call: AdapterCall, inputs: Sequence[str]) -> EmbedOutput:
         """``POST /v1/embeddings``; the vectors are validated by the core."""
-        body = {
-            "model": call.model.external_model_id,
-            "input": list(inputs),
-            "encoding_format": "float",
-        }
-        answer = _object((await call.post(EMBEDDINGS, body)).body)
-        vectors = ordered_vectors(_list(answer.get("data")))
-        return EmbedOutput(vectors, _usage(answer))
+        return await embed_openai(call, inputs)
 
     async def rerank(
         self,
@@ -127,24 +160,9 @@ class OpenAiCompatibleAdapter:
         max_output_tokens: int,
     ) -> StructuredOutput:
         """``POST /v1/chat/completions`` with a ``json_schema`` response format."""
-        body = {
-            "model": call.model.external_model_id,
-            "messages": [{"role": "user", "content": text}],
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {"name": schema_name, "schema": dict(json_schema)},
-            },
-            "max_tokens": max_output_tokens,
-            "temperature": 0,
-        }
-        answer = _object((await call.post(CHAT_COMPLETIONS, body)).body)
-        choices = _list(answer.get("choices"))
-        if not choices:
-            raise rejected()
-        content = _object(_object(choices[0]).get("message")).get("content")
-        if not isinstance(content, str):
-            raise rejected()
-        return StructuredOutput(parse_json(content.encode("utf-8")), _usage(answer))
+        return await structured_openai(
+            call, text, schema_name, json_schema, max_output_tokens
+        )
 
     async def probe(
         self,
@@ -162,5 +180,7 @@ __all__ = [
     "MODELS",
     "RERANK",
     "OpenAiCompatibleAdapter",
+    "embed_openai",
     "ordered_vectors",
+    "structured_openai",
 ]

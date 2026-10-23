@@ -33,12 +33,14 @@ from fastapi_m8 import (
 
 from ai_gateway.controllers.resolution import ResolutionPolicy
 from ai_gateway.credentials.factory import build_credential_store
+from ai_gateway.execution.artifacts import ArtifactPolicy, ArtifactScheduler
 from ai_gateway.execution.limits import ExecutionLimits
+from ai_gateway.execution.receipts import ReceiptSigner
 from ai_gateway.execution.service import ExecutionService
 from ai_gateway.providers.breaker import breakers
 from ai_gateway.providers.http import ClientFactory, ClientLimits
 from ai_gateway.controllers.model_identity import DigestReader
-from ai_gateway.providers.registry import ADAPTERS, OLLAMA
+from ai_gateway.providers.registry import OLLAMA, build_adapters
 
 from .clock import ClockSkewMonitor
 from .config import settings
@@ -81,15 +83,38 @@ credential_store = build_credential_store(settings, engine._engine)
 provider_clients = ClientFactory(
     destination_policy, ClientLimits.from_settings(settings), breakers
 )
+#: Every adapter of this build (T28–T30), Mistral's from its OCR settings.
+adapters = build_adapters(
+    inline_threshold_bytes=settings.AI_OCR_UPLOAD_INLINE_THRESHOLD_BYTES,
+    file_expiry_seconds=settings.AI_PROVIDER_FILE_EXPIRY_SECONDS,
+)
+#: Signs the C-01 OCR receipt; ``None`` without a receipt seed (no OCR).
+receipt_signer = (
+    None
+    if settings.receipt_seed is None or settings.receipt_kid is None
+    else ReceiptSigner(
+        settings.receipt_seed, settings.receipt_kid, settings.deployment_id
+    )
+)
 #: The execution core (D-24): the one path from a verified context to a provider.
 execution_service = ExecutionService(
     engine._engine,
     credential_store,
     provider_clients,
-    ADAPTERS,
+    adapters,
     policy=lambda: ResolutionPolicy.from_settings(settings),
     limits=lambda: ExecutionLimits.from_settings(settings),
     breakers=breakers,
+    deployment_id=settings.deployment_id,
+    receipts=receipt_signer,
+)
+#: Every scheduler-owned D-43 transition; ``T33a`` runs its jobs.
+artifact_scheduler = ArtifactScheduler(
+    engine._engine,
+    credential_store,
+    provider_clients,
+    adapters,
+    ArtifactPolicy.from_settings(settings),
 )
 #: Reads Ollama model digests for registration and the scheduler (T28).
 model_digests = DigestReader(

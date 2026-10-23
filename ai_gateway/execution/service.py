@@ -24,6 +24,14 @@
    * anything else after the marker — a timeout, a transport loss, a
      cancellation, an unexpected error — → ``charged_uncertain``.
 
+**OCR (``T29``).** An upload-capable call carries an
+:class:`~.artifacts.ExecutionArtifacts` tracker, whose upload intent commits
+with ``first_byte_sent_at`` (D-43 (a)); the adapter cleans its own file up
+before it returns, so the settlement composes as the multi-request rule says.
+An ``ok`` OCR execution is signed (:class:`~.receipts.ReceiptSigner`) before
+it settles, over the exact ``OcrResult`` it returns; an installation without
+a receipt seed refuses OCR before any request.
+
 The credential's plaintext lives from the material fetch to the end of the
 adapter call and is wiped on every path, a zero-row marker and a cancelled
 request included. A client disconnect before the marker releases; after it,
@@ -47,6 +55,7 @@ from ai_sdk_m8.schemas import (
     AiErrorCode,
     Capability,
     ExecutionReceipt,
+    OcrResult,
     ProviderExecution,
 )
 from ai_sdk_m8.schemas.management import ProviderType
@@ -68,8 +77,10 @@ from ai_gateway.providers.errors import (
 from ai_gateway.providers.http import ClientFactory, Deadline
 
 from . import settlement
+from .artifacts import ExecutionArtifacts
 from .jobs import Completed, ExecutionJob
 from .limits import ExecutionLimits
+from .receipts import ReceiptSigner
 from .reservation import Reservation, reserve
 
 R = TypeVar("R", bound=BaseModel)
@@ -100,12 +111,25 @@ class ExecutionProgress:
 
     async def first_byte_sent(self) -> None:
         """Record dispatch progress once; refuse when the row cannot send."""
+        if not self.recorded:
+            await self.record_with(
+                partial(settlement.record_first_byte, self._engine, self._execution_id),
+                once=True,
+            )
+
+    async def record_with(
+        self, record: Callable[[], bool], *, once: bool = False
+    ) -> None:
+        """
+        Commit ``record`` — a transaction that sets ``first_byte_sent_at`` too.
+
+        An upload intent (D-43 (a)) commits through here even after the
+        workflow's first byte, so it is never skipped.
+        """
         async with self._lock:
-            if self.recorded:
+            if once and self.recorded:
                 return
-            if not await asyncio.to_thread(
-                settlement.record_first_byte, self._engine, self._execution_id
-            ):
+            if not await asyncio.to_thread(record):
                 raise ProviderFailure(AiErrorCode.TIMEOUT)
             self.recorded = True
 
@@ -137,6 +161,8 @@ class ExecutionService:
         policy: Callable[[], ResolutionPolicy],
         limits: Callable[[], ExecutionLimits],
         breakers: Breakers,
+        deployment_id: str | None = None,
+        receipts: ReceiptSigner | None = None,
     ) -> None:
         self._engine = engine
         self._store = store
@@ -145,6 +171,8 @@ class ExecutionService:
         self._policy = policy
         self._limits = limits
         self._breakers = breakers
+        self._deployment_id = deployment_id
+        self._receipts = receipts
         self._detached: set[asyncio.Future[object]] = set()
 
     async def run(
@@ -165,7 +193,9 @@ class ExecutionService:
         with ExitStack() as stack:
             secret = await self._material(stack, reservation)
             dispatch = await self._mark(execution_id, limits.total_deadline_seconds)
-            return await self._dispatch(reservation, dispatch, adapter, job, secret)
+            return await self._dispatch(
+                principal, reservation, dispatch, adapter, job, secret
+            )
 
     # --- before the marker ----------------------------------------------------
 
@@ -177,6 +207,10 @@ class ExecutionService:
         if adapter is None:
             raise refused_before_send(AiErrorCode.CAPABILITY_UNSUPPORTED)
         require_capability(adapter, capability)
+        if capability is Capability.OCR and (
+            self._receipts is None or self._deployment_id is None
+        ):
+            raise refused_before_send(AiErrorCode.CAPABILITY_UNSUPPORTED)
         breaker = self._breakers.for_provider(resolution.provider_id)
         if breaker.state is BreakerState.OPEN:
             raise refused_before_send(AiErrorCode.BREAKER_OPEN)
@@ -261,6 +295,7 @@ class ExecutionService:
 
     async def _dispatch(
         self,
+        principal: JobContextPrincipal,
         reservation: Reservation,
         dispatch: _Dispatch,
         adapter: ProviderAdapter,
@@ -270,7 +305,11 @@ class ExecutionService:
         execution_id = reservation.execution_id
         progress = ExecutionProgress(self._engine, execution_id)
         try:
-            completed = await self._call(dispatch, adapter, job, secret, progress)
+            artifacts = self._tracker(reservation, progress)
+            completed = await self._call(
+                dispatch, adapter, job, secret, progress, artifacts
+            )
+            signed = self._sign(principal, reservation, completed)
         except ProviderFailure as failure:
             await self._settle_failure(reservation, failure, progress)
             raise gateway_error(failure) from None
@@ -296,8 +335,46 @@ class ExecutionService:
         if not settled:
             # A sweeper settled the row meanwhile: a late answer is discarded.
             raise GatewayError(AiErrorCode.TIMEOUT)
-        receipt = self._receipt(reservation, dispatch.marked, job, completed)
+        receipt = self._receipt(reservation, dispatch.marked, job, completed, signed)
         return Executed(completed.result, receipt)
+
+    def _tracker(
+        self, reservation: Reservation, progress: ExecutionProgress
+    ) -> ExecutionArtifacts | None:
+        """The D-43 tracker of a credentialed OCR call; ``None`` otherwise."""
+        resolution = reservation.resolution
+        if (
+            self._deployment_id is None
+            or resolution.credential_id is None
+            or resolution.credential_version is None
+        ):
+            return None
+        return ExecutionArtifacts(
+            self._engine,
+            progress,
+            execution_id=reservation.execution_id,
+            provider_id=resolution.provider_id,
+            credential_id=resolution.credential_id,
+            credential_version=resolution.credential_version,
+            deployment_id=self._deployment_id,
+        )
+
+    def _sign(
+        self,
+        principal: JobContextPrincipal,
+        reservation: Reservation,
+        completed: Completed[R],
+    ) -> str | None:
+        """The OCR receipt over the exact result returned; ``None`` otherwise."""
+        if not isinstance(completed.result, OcrResult):
+            return None
+        assert self._receipts is not None  # nosec B101 - refused before dispatch
+        return self._receipts.sign(
+            execution_id=reservation.execution_id,
+            context=principal.payload,
+            execution_identity=reservation.execution_identity,
+            result=completed.result,
+        )
 
     async def _call(
         self,
@@ -306,6 +383,7 @@ class ExecutionService:
         job: ExecutionJob[R],
         secret: ResolvedSecret | None,
         progress: ExecutionProgress,
+        artifacts: ExecutionArtifacts | None,
     ) -> Completed[R]:
         deadline = dispatch.deadline
         deadline.require()
@@ -320,6 +398,7 @@ class ExecutionService:
                         progress=progress,
                         deadline=deadline,
                         config=dispatch.marked.config,
+                        artifacts=artifacts,
                     )
                     return await job.execute(adapter, call)
         except TimeoutError:
@@ -369,6 +448,7 @@ class ExecutionService:
         marked: settlement.Marked,
         job: ExecutionJob[R],
         completed: Completed[R],
+        signed: str | None,
     ) -> ExecutionReceipt:
         resolution = reservation.resolution
         return ExecutionReceipt(
@@ -383,6 +463,7 @@ class ExecutionService:
                 embedding_space_id=reservation.embedding_space_id,
                 identity_assurance=marked.identity_assurance,
             ),
+            receipt=signed,
         )
 
     # --- settlements nobody awaits -------------------------------------------

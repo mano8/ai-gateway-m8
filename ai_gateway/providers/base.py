@@ -23,12 +23,12 @@ with ``capability_unsupported`` before a request is built.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 from uuid import UUID
 
-from ai_sdk_m8.schemas import AiErrorCode, Capability, ProviderUsage
+from ai_sdk_m8.schemas import AiErrorCode, Capability, OcrPage, ProviderUsage
 from ai_sdk_m8.schemas.management import ProviderType
 from pydantic import JsonValue
 
@@ -50,6 +50,80 @@ class ModelRef:
     model_revision: str | None = None
 
 
+class DocumentSource(Protocol):
+    """A verified OCR input: exactly ``size`` bytes, streamed or read whole."""
+
+    @property
+    def size(self) -> int:
+        """The verified size in bytes (the signed ``input_bytes``)."""
+
+    def chunks(self) -> AsyncIterator[bytes]:
+        """The bytes in order, read under the spool's lock (D-45)."""
+
+    async def read(self) -> bytes:
+        """The whole document (only below the inline threshold)."""
+
+
+class ArtifactTracker(Protocol):
+    """The D-43 handler transitions of one execution's provider-side file."""
+
+    @property
+    def gateway_file_name(self) -> str:
+        """``m8ai-<deployment_id>-<execution_id>``: the only name ever sent."""
+
+    @property
+    def intended(self) -> bool:
+        """Whether the upload intent was committed (bytes may have left)."""
+
+    def intent_progress(self) -> DispatchProgress:
+        """Progress whose first byte also commits the upload intent (a)."""
+
+    async def activate(self, remote_id: str, expires_at: int | None) -> bool:
+        """(b) ``uploading → active`` before the id is used, or (d) after a loss."""
+
+    async def lost(self) -> None:
+        """(c) ``uploading → uploading_unknown_id``: the id never came back."""
+
+    async def release(self) -> None:
+        """(g) ``active → pending_delete``, in the adapter's ``finally``."""
+
+    async def deleted(self) -> None:
+        """(h) closed, on the provider's deletion proof for the recorded id."""
+
+
+@dataclass(frozen=True)
+class ArtifactProofs:
+    """
+    What a provider's recorded reference documents about its files (D-43).
+
+    Nothing is assumed: each flag is re-read from the provider's reference
+    when its adapter is written, and recorded with the step.
+    """
+
+    deletion_proof: bool
+    absence_proof: bool
+    list_consistency: str
+    safe_server_side_prefix_listing: bool
+    sweep_absence_proof: bool
+
+
+@dataclass(frozen=True)
+class RemoteFile:
+    """One provider file of **this** deployment's prefix; nothing else is kept."""
+
+    remote_id: str
+    file_name: str
+    created_at: int | None
+
+
+@dataclass(frozen=True)
+class Listing:
+    """The prefix matches of one listing; ``complete`` when it reached the end."""
+
+    files: tuple[RemoteFile, ...]
+    complete: bool
+
+
 @dataclass(frozen=True)
 class AdapterCall:
     """One dispatched call: its client, credential, model and revision config."""
@@ -60,6 +134,7 @@ class AdapterCall:
     progress: DispatchProgress
     deadline: Deadline
     config: Mapping[str, JsonValue] = field(default_factory=dict)
+    artifacts: ArtifactTracker | None = None
 
     async def post(
         self,
@@ -135,6 +210,14 @@ class StructuredOutput:
     usage: ProviderUsage | None = None
 
 
+@dataclass(frozen=True)
+class OcrOutput:
+    """The pages an adapter extracted (closed models), and reported usage."""
+
+    pages: tuple[OcrPage, ...]
+    usage: ProviderUsage | None = None
+
+
 class ProviderAdapter(Protocol):
     """One ``provider_type``'s requests for each capability it serves."""
 
@@ -166,6 +249,36 @@ class ProviderAdapter(Protocol):
         """Produce a JSON value for ``json_schema`` from ``text``, capped output."""
 
 
+class OcrAdapter(ProviderAdapter, Protocol):
+    """An adapter that serves OCR and owns provider-side files (D-43)."""
+
+    #: What the provider's reference documents about its files.
+    proofs: ArtifactProofs
+
+    async def ocr(
+        self, call: AdapterCall, document: DocumentSource, pages: Sequence[int]
+    ) -> OcrOutput:
+        """OCR of the verified document, for exactly ``pages``."""
+
+    async def delete_file(
+        self,
+        client: ProviderHttpClient,
+        secret: ResolvedSecret | None,
+        deadline: Deadline,
+        remote_id: str,
+    ) -> bool:
+        """Delete one file; ``True`` only on the documented deletion proof."""
+
+    async def list_files(
+        self,
+        client: ProviderHttpClient,
+        secret: ResolvedSecret | None,
+        deadline: Deadline,
+        prefix: str,
+    ) -> Listing:
+        """This deployment's files only (by prefix); every other entry dropped."""
+
+
 def unsupported() -> ProviderFailure:
     """The refusal of a capability an adapter does not serve; nothing was sent."""
     return refused_before_send(AiErrorCode.CAPABILITY_UNSUPPORTED)
@@ -179,9 +292,16 @@ def require_capability(adapter: ProviderAdapter, capability: Capability) -> None
 
 __all__ = [
     "AdapterCall",
+    "ArtifactProofs",
+    "ArtifactTracker",
+    "DocumentSource",
     "EmbedOutput",
+    "Listing",
     "ModelRef",
+    "OcrAdapter",
+    "OcrOutput",
     "ProviderAdapter",
+    "RemoteFile",
     "RerankOutput",
     "StructuredOutput",
     "require_capability",

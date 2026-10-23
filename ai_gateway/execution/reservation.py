@@ -26,6 +26,18 @@ One transaction, in this order, and nothing else:
    ``reservation_expires_at``, the resolved provider, boundary, model,
    profile revision and credential version, and the context's ``exp``.
 
+**OCR** (``:dispatch``, D-44) does not create a row: step 8 is the CAS
+``spooled → pending`` of the row phase 1 created, under the **spool
+binding** — the dispatch context's ``spool_id`` is the row id, and its
+``iss``, ``azp`` (the presenting client), ``job_ref``, ``attempt``,
+``profile_key``, ``tenant_id``, ``user_id``, ``input_sha256``,
+``input_bytes`` and ``ocr_options_hash`` equal the recorded ones, the spool
+unexpired — else ``context_invalid``, the row untouched. The run's rate
+admission and occupancy slot were taken at ``receiving`` and are carried,
+never re-acquired (step 7 is skipped); the budget units are reserved here.
+The dispatch context's own ``data_class`` is recorded, as the class the
+policy evaluated.
+
 A refusal anywhere rolls the whole transaction back: no row, no units, no
 window, no slot, and the ``jti`` is not burned. Nothing after this
 transaction re-resolves a binding, a model or a profile.
@@ -301,6 +313,68 @@ def _pending_values(
     }
 
 
+#: What the dispatch reservation writes on a ``spooled`` row; the binding
+#: columns are immutable (T16) and asserted equal instead.
+_DISPATCH_COLUMNS: Final = frozenset(
+    {
+        "status",
+        "data_class",
+        "reserved_units",
+        "reservation_day",
+        "reservation_expires_at",
+        "resolved_provider_id",
+        "resolved_boundary",
+        "resolved_model_id",
+        "resolved_profile_id",
+        "resolved_profile_revision",
+        "resolved_credential_id",
+        "resolved_credential_version",
+        "context_exp",
+        "execution_identity",
+        "embedding_space_id",
+    }
+)
+
+
+def _bind_spool(
+    connection: Connection, principal: JobContextPrincipal, values: dict[str, object]
+) -> UUID:
+    """``spooled → pending`` under the D-44 spool binding; the row id."""
+    payload = principal.payload
+    if payload.spool_id is None:
+        raise GatewayError(AiErrorCode.CONTEXT_INVALID)
+    e = ai_execution
+    bound = connection.execute(
+        sa.update(e)
+        .where(
+            e.c.id == UUID(payload.spool_id),
+            e.c.status == ExecutionStatus.SPOOLED.value,
+            e.c.capability == Capability.OCR.value,
+            e.c.spool_expires_at > sa.func.now(),
+            e.c.client_scope_id == principal.client_id,
+            e.c.issuer == payload.iss,
+            e.c.azp == payload.azp,
+            e.c.job_ref == payload.job_ref,
+            e.c.attempt == payload.attempt,
+            e.c.profile_key == payload.profile_key,
+            e.c.tenant_scope_id.is_not_distinct_from(payload.tenant_id),
+            e.c.user_scope_id.is_not_distinct_from(payload.user_id),
+            e.c.input_sha256 == payload.input_sha256,
+            e.c.input_bytes == payload.input_bytes,
+            e.c.ocr_options_hash == payload.ocr_options_hash,
+        )
+        .values(
+            **{k: v for k, v in values.items() if k in _DISPATCH_COLUMNS},
+            updated_at=sa.func.now(),
+        )
+        .returning(e.c.id)
+    ).first()
+    if bound is None:
+        raise GatewayError(AiErrorCode.CONTEXT_INVALID)
+    execution_id: UUID = bound[0]
+    return execution_id
+
+
 def reserve(
     engine: Engine,
     principal: JobContextPrincipal,
@@ -326,7 +400,6 @@ def reserve(
         scopes = scopes_of(principal, limits)
         for scope in scopes:
             _reserve_units(connection, scope, day, units)
-        admit(connection, principal.client_id, scopes, limits)
         values = _pending_values(
             principal,
             job,
@@ -336,7 +409,13 @@ def reserve(
             day,
             limits.reservation_ttl_seconds,
         )
-        connection.execute(sa.insert(ai_execution).values(id=execution_id, **values))
+        if job.capability is Capability.OCR:
+            execution_id = _bind_spool(connection, principal, values)
+        else:
+            admit(connection, principal.client_id, scopes, limits)
+            connection.execute(
+                sa.insert(ai_execution).values(id=execution_id, **values)
+            )
     return Reservation(
         execution_id=execution_id,
         resolution=resolution,

@@ -28,7 +28,7 @@ from ai_gateway.providers.openai_compatible import (
     OpenAiCompatibleAdapter,
     ordered_vectors,
 )
-from ai_gateway.providers.registry import ADAPTERS
+from ai_gateway.providers.registry import OPENAI_COMPATIBLE, build_adapters
 from execution_world import (
     as_owner,
     clients,
@@ -383,7 +383,9 @@ def test_an_unsupported_capability_is_refused_before_any_call() -> None:
         and caught.value.before_send
     )
     assert Capability.OCR not in ADAPTER.capabilities
-    assert isinstance(ADAPTERS[ProviderType.OPENAI_COMPATIBLE], OpenAiCompatibleAdapter)
+    shipped = build_adapters(inline_threshold_bytes=1, file_expiry_seconds=1)
+    assert shipped[ProviderType.OPENAI_COMPATIBLE] is OPENAI_COMPATIBLE
+    assert isinstance(OPENAI_COMPATIBLE, OpenAiCompatibleAdapter)
 
 
 def test_the_probe_lists_the_models() -> None:
