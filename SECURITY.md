@@ -327,6 +327,16 @@ keys, capability, revision, dimensions, `embedding_space_id`,
 `ocr_execution_identity` and `identity_assurance`. They never see a
 credential, a provider or its `base_url`.
 
+Metrics are declared in one module (`ai_gateway/core/metrics.py`) and every
+label is a member of a closed vocabulary: a capability, a provider type, a
+stored status, an error code, a backend, a scope type or a table name. No
+collector is labelled with a user, tenant, client, filename, query, model
+input or key material; `tests/test_metrics.py` fails on any metric family or
+label not named in the allowlist and asserts a canary absent from the
+exposition. Every execution settlement also logs one structured line (ids,
+units, status, error class) on `ai_gateway.audit`. `ai_breaker_state` is the
+last state a request observed in the process, not a cross-replica value.
+
 ### Model identity (LLM03, D-11)
 
 A model's identity is `execution_identity = h(provider_id, external_model_id,
@@ -409,6 +419,17 @@ between the release and the lock unlink, is finished on the next pass with
 the reservation released exactly once. A lock that vanished while its
 reservation is held is never released automatically; only the audited
 `spool repair` command releases it.
+
+### Retention and audit pruning (T33)
+
+Retention is a positive predicate, not an age cut-off: a row that still owns
+a ledger entry, a spool reservation, an occupancy slot or a remote artifact
+is never collected, whatever its age, and an unreconciled `charged_uncertain`
+row is never collected. `reconcile` records the operator's evidence in
+`ai_admin_audit`. `GET /v1/usage` returns aggregates only; a tenant admin
+cannot learn that another tenant exists. The runtime role cannot delete audit
+rows; `audit-prune` runs as the schema owner, writes its own summary row
+first and refuses a future cut-off.
 
 ### Credential validation (T25)
 

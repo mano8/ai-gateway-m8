@@ -153,6 +153,7 @@ Paths are the `ai-sdk-m8` route table's, under `{API_PREFIX}`:
 | `v1/me/credentials` | `WRITER` and above | the caller's own credentials (owner and tenant from the token) |
 | `v1/admin/user-credentials` | superuser | list, disable or delete a user's credential, nothing else |
 | `v1/tenants/{tenant_id}/bindings`, `v1/me/bindings` | as the scope's credentials | the scope's bindings |
+| `v1/usage` | tenant `ADMIN`, or a superuser | aggregates per UTC day: admission units (`reserved`, `used`) and provider-reported usage as distinct figures; a tenant admin sees only its token's `tenant_id` (another tenant's id answers `404`, a token without one gets an empty report), a superuser the platform or `?tenant_id=` |
 
 - **Providers.** `base_url` passes the static destination check on every
   write. `boundary` is fixed. The endpoint (`base_url`, `provider_type`,
@@ -385,6 +386,39 @@ python -m ai_gateway.execution spool repair \
 
 The release is audited (`spool.repair`), and the next orphan pass removes the
 data file.
+
+## Retention, reconciliation and audit pruning
+
+`AI_EXECUTION_RETENTION_DAYS` (default 90) bounds `ai_execution` and
+`ai_usage`. The runtime removes an `ai_execution` row only when **every**
+condition holds: a terminal status (`ok`, `failed`, `released`, `abandoned`,
+or `charged_uncertain` once reconciled); no pending spool cleanup or held
+reservation; its occupancy slot returned; no remote-artifact row referencing
+it; a budget day before the current one (or none); and older than the
+window. Settlement, unlink and remote deletion happen first, in the
+sweepers; retention never deletes as a substitute for stalled work. An
+`ai_usage` day goes only when no execution still carries it.
+
+A `charged_uncertain` row stays until an operator records evidence (the
+charge is kept):
+
+```bash
+python -m ai_gateway.execution execution reconcile \
+    --id <execution-id> --evidence "<provider invoice or ticket>"
+```
+
+The runtime never prunes the audit tables. `audit-prune` ships in the image
+and runs only as `ai_owner`, through the `ai-migrate` service:
+
+```bash
+python -m ai_gateway.audit_prune --before 2026-01-01 --operator <name>
+```
+
+It writes an `audit.prune` row (counts, range, operator) in the same
+transaction that deletes the rows before the date, refuses a future date,
+and as `ai_runtime` fails on permissions without changing anything.
+`ai_audit_table_bytes{table}` exports each audit table's size; alert when it
+passes the threshold the operator sets for the deployment.
 
 ## Deployment
 

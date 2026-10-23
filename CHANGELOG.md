@@ -185,6 +185,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   D-45 cleaner; orphaned spool and lock files collected under `LOCK_EX`;
   `python -m ai_gateway.execution spool repair` (audited). Metrics
   `ai_job_contexts_total{event}` and `ai_reservations_settled_total{outcome}`.
+- Metrics, audit lines and retention (`T33`): the remaining C-13 collectors
+  (`ai_requests_total`, `ai_request_duration_seconds`,
+  `ai_provider_errors_total`, `ai_ocr_pages_total`,
+  `ai_embedding_inputs_total`, `ai_tokens_total`,
+  `ai_credential_resolution_total`, `ai_quota_rejections_total`,
+  `ai_breaker_state`, `ai_credential_throttled_total`,
+  `ai_audit_table_bytes`, `ai_scheduler_lease_epoch`) behind a label
+  allowlist test; every settlement logs one structured `execution` audit
+  line (ids, units, status). `ai_gateway/execution/retention.py`: the
+  positive eligibility predicate for `ai_execution`, `ai_usage` day
+  retention, and `python -m ai_gateway.execution execution reconcile`
+  (audited). `GET {API_PREFIX}/v1/usage` for tenant admins and the
+  superuser (aggregates only). `python -m ai_gateway.audit_prune --before
+  <date> --operator <name>`, owner role only, writes its own summary row.
 - `ai_execution.ocr_options` and `expected_execution_identity`, recorded at
   `spooled` and frozen after `receiving` (`0001_initial`, unreleased).
 - `OcrJob` and the `:dispatch` reservation: `spooled → pending` under the
