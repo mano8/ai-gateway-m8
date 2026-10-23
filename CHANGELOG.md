@@ -156,6 +156,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/v1/chat/completions` with a `json_schema` response format, `max_tokens`
   at the reserved cap and `temperature: 0` (a refusal is rejected),
   `/v1/rerank` in the Jina/Cohere shape, and `/v1/models` as the probe.
+- The Mistral adapter (`T29`): embeddings and structured output in the
+  OpenAI shape, and OCR via `/v1/ocr` with the reserved page list,
+  `include_image_base64: false` and `include_blocks: false` — inline as a
+  data URL below `AI_OCR_UPLOAD_INLINE_THRESHOLD_BYTES` for a PDF or image,
+  otherwise uploaded to `/v1/files` (`purpose=ocr`, `visibility=user`, an
+  `expiry`, the gateway's own file name and media type). The answer's
+  `purpose`, `visibility` and `expires_at` are checked before the file is
+  read; a mismatch deletes it and fails the call.
+- `OcrJob` and the `:dispatch` reservation: `spooled → pending` under the
+  D-44 spool binding, budget units reserved, the slot taken at `receiving`
+  carried.
+- The signed OCR receipt (`m8.ai.ocr-receipt.v1`) on every `ok` OCR
+  execution, over `SHA-256(JCS(OcrResult))`.
+- D-43 remote artifacts: the upload intent committed with
+  `first_byte_sent_at` before the first upload byte, the remote id recorded
+  before use, deletion in the adapter's `finally`, and the scheduler's
+  transitions (`ArtifactScheduler`) under the recorded credential version
+  only; `ai_remote_artifacts{status}`; `python -m ai_gateway.execution
+  remote-artifact accept-residual`.
 
 ### Changed
 

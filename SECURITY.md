@@ -348,6 +348,39 @@ An embedding of a dimension other than the registered model's is refused as
 `provider_rejected` and audited against the model (`model.incident`,
 `dimension_mismatch`).
 
+### Provider-side files (D-43)
+
+An OCR upload leaves a file at the provider. It is tracked from before its
+first byte: the intent row is committed with `first_byte_sent_at`, so a
+crash at any later point leaves a row the scheduler owns, and that row's
+foreign key keeps the credential version alive — no version a file was
+uploaded under can be destroyed while its row exists. Only the gateway's
+own name (`m8ai-<deployment>-<execution>`) and a fixed media type reach the
+provider; the file is private to the key's user (`visibility=user`) and
+expires.
+
+Cleanup, listing and confirmation use the **recorded** credential version
+only, never the current one, whatever happened to the credential since. A
+row closes only on the provider's documented deletion proof (Mistral:
+`200 {deleted: true}` for the recorded id). A `404`, a negative listing or a
+passed expiry is evidence only: after its retries such a row is parked as
+`manual_cleanup_required`, alerted, and closed only by a later proof or an
+audited `accept-residual`. A listing keeps only names of this deployment's
+prefix; another installation's or a tenant's files are never logged,
+stored or deleted. Incident listings run under a platform key when
+`AI_REMOTE_ARTIFACT_PLATFORM_INCIDENT_LISTING` allows it, and under a
+tenant's or a user's key only with its `incident_listing_consent`.
+
+### OCR provenance receipt (C-01)
+
+Every `ok` OCR result carries an Ed25519 receipt under the domain tag
+`m8.ai.ocr-receipt.v1`, signed with the web service's receipt seed. It
+binds the installation, the execution, the job context's `job_ref`,
+`attempt`, `azp`, `profile_key`, `input_sha256` and `ocr_options_hash`, the
+execution identity and `SHA-256(JCS(OcrResult))` of the exact body
+returned. A different domain tag makes it fail as a job context or an
+attestation; the seed signs nothing else.
+
 ### Supply chain and image provenance
 
 ### Database roles, migrations and restore

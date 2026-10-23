@@ -63,8 +63,30 @@ fleet's services.
   `/api/chat` with a JSON-schema `format`, `/api/tags`; `openai_compatible` —
   `/v1/embeddings`, `/v1/chat/completions` with a `json_schema` response
   format, `/v1/rerank` (the Jina/Cohere shape) for models that declare it,
-  `/v1/models`. Paths are appended to the provider's `base_url`, so an
-  OpenAI-compatible `base_url` names the server root, not its `/v1`.
+  `/v1/models`; `mistral` — `/v1/embeddings` and `/v1/chat/completions` in
+  the OpenAI shape, `/v1/ocr`, `/v1/files`, `/v1/models`. Paths are appended
+  to the provider's `base_url`, so an OpenAI-compatible `base_url` names the
+  server root, not its `/v1`.
+- **OCR** (`ai_gateway/execution/jobs.py`, `ai_gateway/providers/mistral.py`).
+  A document below `AI_OCR_UPLOAD_INLINE_THRESHOLD_BYTES` whose bytes are a
+  PDF or a PNG, JPEG, GIF, TIFF or WebP image is sent inline as a data URL;
+  any other is uploaded as `purpose=ocr`, `visibility=user`, the shortest
+  `expiry` covering `AI_PROVIDER_FILE_EXPIRY_SECONDS`, named
+  `m8ai-<AI_DEPLOYMENT_ID>-<execution_id>` with a fixed media type. The
+  provider is sent the gateway's reserved page list with images and blocks
+  off, and the answer is held to that list. `:dispatch` reserves on the
+  `spooled` row phase 1 created, under the spool binding (D-44). Every `ok`
+  OCR execution carries the signed `m8.ai.ocr-receipt.v1` receipt over
+  `SHA-256(JCS(OcrResult))`; without `AI_EXECUTION_RECEIPT_KEY_FILE` OCR is
+  refused before any request.
+- **Remote artifacts** (`ai_gateway/execution/artifacts.py`, D-43). Each
+  provider-side file is a row from before its first upload byte to a
+  deletion proof under the recorded credential version. The scheduler's jobs
+  (run by `T33a`) age lost uploads, retire files no call can read, delete
+  with backoff and park the exhausted as `manual_cleanup_required`
+  (`ai_remote_artifacts{status}`), list for lost ids where permitted, and
+  sweep platform keys for untracked files of this deployment's prefix when
+  `AI_REMOTE_ARTIFACT_PLATFORM_SWEEP_ENABLED`.
 - **Execution core** (`ai_gateway/execution/`, D-24). One call follows the
   D-24 sequence: a reservation transaction (destination by C-04 with D-08,
   the model's and provider's first use stamped and the frozen identity
@@ -288,6 +310,23 @@ path "transit/encrypt/<key>" { capabilities = ["update"] }
 path "transit/decrypt/<key>" { capabilities = ["update"] }
 path "auth/token/lookup-self" { capabilities = ["read"] }
 ```
+
+## Remote-artifact residual risk
+
+A provider file the scheduler could not prove deleted stays
+`manual_cleanup_required`, and the version it was uploaded under cannot be
+destroyed. After deleting it by hand, or accepting that it outlives its
+row, an operator closes the row as an accepted residual risk (never as
+cleanup):
+
+```bash
+python -m ai_gateway.execution remote-artifact accept-residual \
+    --id <artifact-id> --evidence "<ticket or note>"
+```
+
+The command writes an `ai_admin_audit` row with the remote id, the file
+name, the provider's expiry and the evidence, and exits `1` when no parked
+row has that id.
 
 ## Deployment
 
