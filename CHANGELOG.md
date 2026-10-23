@@ -169,6 +169,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   counts, three in a row is `invalid`, a success resets the count in the same
   statement, anything else is `inconclusive`; audited
   (`credential.validate`) and rate-limited with the other credential writes.
+- The execution routes (`T31`): `v1/execute/embed`, `rerank` and
+  `structured-output` with bodies counted and capped while read and the D-24
+  input bounds; structured-output schemas accepted only in a closed dialect
+  (the D-18 keywords and local `#/$defs` references) and every output
+  validated against them; `v1/execute/ocr` (phase 1: a streaming two-part
+  multipart reader, the `receiving` row with its admissions, spool slot and
+  capacity reservation, the D-45 spool receiver, and the size, digest and
+  options-hash checks) and `v1/execute/ocr/{spool_id}:dispatch` (the spool
+  read under its lock); the OCR family only with `ocr` enabled. The
+  execution routes document the `ServiceClient` scheme.
+- `ai_execution.ocr_options` and `expected_execution_identity`, recorded at
+  `spooled` and frozen after `receiving` (`0001_initial`, unreleased).
 - `OcrJob` and the `:dispatch` reservation: `spooled → pending` under the
   D-44 spool binding, budget units reserved, the slot taken at `receiving`
   carried.

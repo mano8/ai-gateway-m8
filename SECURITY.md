@@ -371,6 +371,33 @@ stored or deleted. Incident listings run under a platform key when
 `AI_REMOTE_ARTIFACT_PLATFORM_INCIDENT_LISTING` allows it, and under a
 tenant's or a user's key only with its `incident_listing_consent`.
 
+### Execution request bodies (T31)
+
+Every execution body is read once from the stream and counted as it
+arrives, so neither an absent nor a false `Content-Length` lets more than
+`AI_MAX_REQUEST_BYTES` in, and nothing is parsed before the cap holds. The
+OCR form is read without FastAPI's spooling `UploadFile`: exactly two parts
+(`options`, then `document`), part headers of at most 8 KiB, and the
+client's file name ignored. A structured-output schema is admin- or
+caller-authored input: it is accepted only in a closed dialect with no
+`pattern`, no combinators and no remote or relative `$ref`, bounded in
+size and depth, and the gateway's own validator resolves references inside
+the schema only, so no reference can reach the network or a file.
+
+### The OCR spool (D-44, D-45)
+
+A document is spooled and verified before any provider sees it, and only
+under the signed claims: no byte past the signed `input_bytes` is written,
+and the digest, size and options hash must equal the spool context's. The
+reservation is sized from those signed bytes, rounded up to the
+filesystem's allocation unit, so a client header never sizes it. Only
+`ai_gateway/execution/spool.py` opens spool files. Its lock lives on a
+separate file whose identity outlives the data, and no data descriptor is
+opened outside a held, re-validated lock. A cleaner therefore never frees
+the reservation of blocks a paused reader or writer still holds, and the
+release happens exactly once. A dispatch context must equal every claim the
+spool recorded, the presenting client included, or nothing is sent.
+
 ### Credential validation (T25)
 
 `:validate` sends one minimal authenticated request with the credential's

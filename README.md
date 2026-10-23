@@ -99,6 +99,47 @@ fleet's services.
   Uncertain outcomes after the marker are charged, never refunded; the
   sweepers settle by stored status.
 
+## Execution routes
+
+Paths are the `ai-sdk-m8` route table's, under `{API_PREFIX}`; every one
+needs a service client with `execute:<capability>` and a signed job context
+(`X-AI-Job-Context`), and nothing else:
+
+| Route | Body | Bounds |
+| --- | --- | --- |
+| `v1/execute/embed` | `EmbedRequest` | `AI_MAX_EMBED_INPUTS` inputs of `AI_MAX_INPUT_CHARS` |
+| `v1/execute/rerank` | `RerankRequest` | `AI_MAX_RERANK_CANDIDATES` candidates; query and each within `AI_MAX_INPUT_CHARS`; `local` providers only |
+| `v1/execute/structured-output` | `StructuredOutputRequest` | input within `AI_MAX_INPUT_CHARS`; the schema in the closed dialect, `AI_MAX_SCHEMA_BYTES`, `AI_MAX_SCHEMA_DEPTH` |
+| `v1/execute/ocr` | `multipart/form-data`: `options` (`OcrRequest`), then `document` | a `phase=spool` context; the signed `input_bytes` (at most `AI_MAX_REQUEST_BYTES`); `AI_MAX_OCR_PAGES` |
+| `v1/execute/ocr/{spool_id}:dispatch` | none | a `phase=dispatch` context bound to the spool |
+
+- **Bodies.** Every body is counted while it is read, chunked or not, and
+  aborted at `AI_MAX_REQUEST_BYTES` (`413 request_too_large`) before anything
+  is parsed; `Content-Length` is never trusted. A body outside its model is
+  FastAPI's `422`.
+- **Structured output.** The schema may use `type` (`string`, `number`,
+  `integer`, `boolean`, `array`, `object`), `enum`, `required`, `minimum`,
+  `maximum`, `minLength`, `maxLength`, `format` (`date`, `date-time`, `uri`),
+  `description`, `properties`, `additionalProperties` (a boolean), `items`,
+  and `$ref` to `#/$defs/<name>` only; anything else is `422` with no
+  provider call. The output is validated against it before the execution
+  settles (`502 provider_rejected` otherwise, charged).
+- **OCR, two phases (D-44).** Phase 1 creates the `receiving` row (the
+  context redeemed, one rate admission, the client slot, the spool slot and a
+  capacity reservation sized from the signed `input_bytes`), streams the
+  `document` part into `AI_OCR_SPOOL_DIR` — never past the signed size and
+  within `AI_UPLOAD_TOTAL_TIMEOUT_SECONDS` — checks its SHA-256, size and
+  options hash, and answers `{spool_id, expires_at}` without calling any
+  provider. `:dispatch` reserves the budget on that row, reads the spool under
+  its lock and runs the provider call; the requested pages, or the first
+  `AI_MAX_OCR_PAGES`, are the units. A spool not dispatched within
+  `AI_OCR_SPOOL_TTL_SECONDS` is abandoned. `AI_MAX_CONCURRENT_SPOOLS` uploads
+  at a time, and `AI_OCR_SPOOL_MAX_BYTES` reserved in all, answer `503
+  capacity_exhausted` with `Retry-After` beyond them. The family is `404`
+  unless `ocr` is in `AI_CAPABILITIES_ENABLED`.
+- **`ocr_options_hash`** is SHA-256 over the JCS of `OcrRequest.options`
+  (`{"pages": null}` when no pages are named).
+
 ## Management routes
 
 Paths are the `ai-sdk-m8` route table's, under `{API_PREFIX}`:
