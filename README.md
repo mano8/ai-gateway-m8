@@ -136,14 +136,19 @@ Paths are the `ai-sdk-m8` route table's, under `{API_PREFIX}`:
   provider takes none. A global binding cannot fall through.
 - **Credentials.** Each scope has the same verbs: list, create, get, update
   (name and incident-listing consent), delete (logical), `:rotate`,
-  `:disable`, `:enable`, `:reconfirm` and `remote-artifacts`. A credential
-  outside the caller's scope answers the same `404` as one that never
-  existed. No body can name a provider change, a scope, a tenant or an owner.
+  `:validate`, `:disable`, `:enable`, `:reconfirm` and `remote-artifacts`. A
+  credential outside the caller's scope answers the same `404` as one that
+  never existed. No body can name a provider change, a scope, a tenant or an owner.
   The same key twice in one scope is refused (`409`). Tenant and user scopes
-  hold at most `AI_MAX_CREDENTIALS_PER_SCOPE` credentials. Creates and
-  rotations are rate-limited per JWT `sub` (20 per minute). While
-  `AI_USER_BYOK_ENABLED` is false, creating, rotating, enabling and
-  re-confirming a user credential answer `403`. A binding follows its
+  hold at most `AI_MAX_CREDENTIALS_PER_SCOPE` credentials. Creates,
+  rotations and validations are rate-limited per JWT `sub` (20 per minute).
+  While `AI_USER_BYOK_ENABLED` is false, creating, rotating, validating,
+  enabling and re-confirming a user credential answer `403`. `:validate`
+  probes the provider (`GET /api/tags` or `/v1/models`) with an `active`
+  credential's current version and answers `valid`, `auth_failed` or
+  `inconclusive`: only a `401`/`403` counts, the third in a row makes the
+  credential `invalid`, a success resets the count, and a timeout, a `5xx`,
+  an open breaker or a store outage changes nothing. A binding follows its
   credential: unless the credential is `active`, the binding is
   `credential_unavailable`.
 - **Bindings and resolution (C-04).** A binding names a model and one of

@@ -371,6 +371,18 @@ stored or deleted. Incident listings run under a platform key when
 `AI_REMOTE_ARTIFACT_PLATFORM_INCIDENT_LISTING` allows it, and under a
 tenant's or a user's key only with its `incident_listing_consent`.
 
+### Credential validation (T25)
+
+`:validate` sends one minimal authenticated request with the credential's
+current version to the provider's frozen endpoint, through the same D-20
+client as an execution (destination checks, no redirects, bounded bodies).
+Only the provider's own `401`/`403` counts against the key, and it never
+opens the provider's breaker; a gateway-side failure (a timeout, a store
+outage, an open breaker) cannot invalidate a key. An outcome is recorded
+only while the probed version is still current, so a rotation during the
+probe is never charged with the old key's failures. No header, body or
+secret is logged, returned or audited.
+
 ### OCR provenance receipt (C-01)
 
 Every `ok` OCR result carries an Ed25519 receipt under the domain tag

@@ -164,6 +164,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `expiry`, the gateway's own file name and media type). The answer's
   `purpose`, `visibility` and `expires_at` are checked before the file is
   read; a mismatch deletes it and fails the call.
+- `POST …/credentials/{id}:validate` (`T25`) in every scope: a provider
+  probe with the current version through the D-20 client; `401`/`403`
+  counts, three in a row is `invalid`, a success resets the count in the same
+  statement, anything else is `inconclusive`; audited
+  (`credential.validate`) and rate-limited with the other credential writes.
 - `OcrJob` and the `:dispatch` reservation: `spooled → pending` under the
   D-44 spool binding, budget units reserved, the slot taken at `receiving`
   carried.
