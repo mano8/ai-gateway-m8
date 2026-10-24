@@ -58,6 +58,12 @@ settings require.
 **Back up `./secrets`.** It holds the installation id and, in the local-KEK
 stacks, the KEK. Without them, the stored credentials cannot be read.
 
+**Remove the test client before real use.** `init.sh` registers the live
+suite's `security-tests` service client in `secrets/ai_service_clients.json`.
+It holds every execute scope and `job-context:issue`, with the test issuer's
+key, so the suite can run against the stack. A deployment that serves real
+callers replaces that file with its own clients only.
+
 Rotation is not an `init.sh` operation. Rotating the KEK or the fingerprint
 key is a gateway command (the README's *Credential storage and key rotation*). A regenerated key
 would leave every stored credential unreadable.
