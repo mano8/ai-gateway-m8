@@ -21,6 +21,7 @@ from ai_gateway.core.execution_guard import (
     build_execution_router,
     require_clock_within_bound,
     require_job_context,
+    require_restore_clear,
 )
 from ai_gateway.main import app as gateway_app
 from conftest import MEDIA_SERVICE, bearer
@@ -80,6 +81,7 @@ def test_the_shipped_execution_router_carries_the_guard() -> None:
     calls = [d.dependency for d in execution.router.dependencies]
     assert calls == [
         require_clock_within_bound,
+        require_restore_clear,
         require_job_context,
         SERVICE_CLIENT_SCHEME,
     ]
@@ -89,9 +91,10 @@ def test_the_ocr_router_answers_its_gate_first() -> None:
     from ai_gateway.app.routes import ocr
 
     calls = [d.dependency for d in ocr.router.dependencies]
-    assert calls[:3] == [
+    assert calls[:4] == [
         ocr.require_ocr_enabled,
         require_clock_within_bound,
+        require_restore_clear,
         require_job_context,
     ]
 

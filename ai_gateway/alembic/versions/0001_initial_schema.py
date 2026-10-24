@@ -698,6 +698,7 @@ def upgrade() -> None:
             server_default=sa.text("'1970-01-01 00:00:00+00'"),
             nullable=False,
         ),
+        sa.Column("last_success_at", sa.DateTime(timezone=True), nullable=True),
         sa.CheckConstraint("epoch >= 0", name="ck_ai_scheduler_lease_epoch"),
         sa.PrimaryKeyConstraint("job"),
     )

@@ -542,6 +542,7 @@ def test_the_database_backend_needs_its_key_files(
         previous_keks=(),
         fingerprint_key=fingerprint_key,
         previous_fingerprint_key=None,
+        is_scheduler=False,
     )
     with pytest.raises(UnsupportedBackendError, match=match):
         build_credential_store(settings, deps.db_engine)  # type: ignore[arg-type]

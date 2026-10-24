@@ -133,7 +133,7 @@ class DatabaseCredentialStore:
         self,
         engine: Engine,
         kek: KekProvider,
-        fingerprint_keys: FingerprintKeys,
+        fingerprint_keys: FingerprintKeys | None,
         *,
         resolve_timeout_seconds: float,
     ) -> None:
@@ -146,6 +146,13 @@ class DatabaseCredentialStore:
         return f"DatabaseCredentialStore(kek={self._kek!r})"
 
     @property
+    def _fp(self) -> FingerprintKeys:
+        """The fingerprint keys; the scheduler run-mode holds none (D-42)."""
+        if self._fingerprints is None:
+            raise RuntimeError("this run-mode holds no fingerprint key: no writes")
+        return self._fingerprints
+
+    @property
     def kek_version(self) -> str:
         """The KEK generation new versions are wrapped under."""
         return self._kek.active_version
@@ -153,7 +160,7 @@ class DatabaseCredentialStore:
     @property
     def fingerprint_version(self) -> str:
         """The fingerprint-key generation new versions use."""
-        return self._fingerprints.active_version
+        return self._fp.active_version
 
     # --- writes ------------------------------------------------------------
 
@@ -188,7 +195,7 @@ class DatabaseCredentialStore:
         connection.execute(
             sa.update(_C).where(_C.c.id == credential_id).values(**pointer)
         )
-        return StoredVersion(version, fingerprint, self._fingerprints.active_version)
+        return StoredVersion(version, fingerprint, self._fp.active_version)
 
     def _insert_version(
         self, connection: Connection, row: RowMapping, version: int, secret: SecretStr
@@ -201,7 +208,7 @@ class DatabaseCredentialStore:
         except KekError:
             # A KEK outage (Vault unreachable) refuses the write; never a fallback.
             raise credential_unavailable() from None
-        fingerprint = self._fingerprints.compute(identity, plaintext)
+        fingerprint = self._fp.compute(identity, plaintext)
         connection.execute(
             sa.insert(_V).values(
                 credential_id=row["id"],
@@ -215,7 +222,7 @@ class DatabaseCredentialStore:
                 kek_key_id=envelope.wrapped.key_id,
                 kek_key_version=envelope.wrapped.key_version,
                 fingerprint=fingerprint,
-                fingerprint_key_version=self._fingerprints.active_version,
+                fingerprint_key_version=self._fp.active_version,
                 prepare_id=secrets.token_hex(16),
                 base_version=row["current_version"],
                 material_committed_at=sa.func.now(),
@@ -239,9 +246,7 @@ class DatabaseCredentialStore:
         self, credential: CredentialIdentity, secret: SecretStr
     ) -> dict[str, str]:
         """``secret``'s fingerprint in the scope, per configured generation."""
-        return self._fingerprints.all(
-            credential, secret.get_secret_value().encode("utf-8")
-        )
+        return self._fp.all(credential, secret.get_secret_value().encode("utf-8"))
 
     def duplicate_in_scope(
         self, connection: Connection, credential: CredentialIdentity, secret: SecretStr
@@ -419,15 +424,13 @@ class DatabaseCredentialStore:
         """Recompute every fingerprint under an older key from the plaintext."""
         count = 0
         column = _V.c.fingerprint_key_version
-        while rows := self._stale(
-            connection, column, self._fingerprints.active_version
-        ):
+        while rows := self._stale(connection, column, self._fp.active_version):
             for row in rows:
                 identity = identity_of(row)
                 aad = version_aad(identity, row["version"])
                 plaintext = open_envelope(_envelope(row), aad, self._kek)
                 try:
-                    fingerprint = self._fingerprints.compute(identity, bytes(plaintext))
+                    fingerprint = self._fp.compute(identity, bytes(plaintext))
                 finally:
                     plaintext[:] = bytes(len(plaintext))
                 connection.execute(
@@ -438,7 +441,7 @@ class DatabaseCredentialStore:
                     )
                     .values(
                         fingerprint=fingerprint,
-                        fingerprint_key_version=self._fingerprints.active_version,
+                        fingerprint_key_version=self._fp.active_version,
                     )
                 )
             count += len(rows)
@@ -463,7 +466,11 @@ class DatabaseCredentialStore:
         """Refuse to run while a stored row needs a generation not configured."""
         held = self.generations(connection)
         missing_kek = sorted(v for v in held.kek if not self._kek.covers(v))
-        missing_fp = sorted(set(held.fingerprint) - self._fingerprints.generations())
+        missing_fp = (
+            []
+            if self._fingerprints is None  # the scheduler computes none (D-42)
+            else sorted(set(held.fingerprint) - self._fingerprints.generations())
+        )
         if missing_kek or missing_fp:
             raise KeyCoverageError(
                 "stored credential versions need key generations this replica "

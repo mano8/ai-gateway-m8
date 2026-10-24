@@ -112,7 +112,35 @@ def test_meta_satisfies_the_sdk_contract_check() -> None:
 # --- clock skew --------------------------------------------------------------
 
 
-def test_health_is_ok_with_a_synchronised_clock(client: TestClient) -> None:
+@pytest.fixture
+def scheduler_fresh() -> Iterator[None]:
+    """Every scheduler job succeeded a second ago (D-42 ``/health``)."""
+    import sqlalchemy as sa
+
+    from ai_gateway.db_models.installation import ai_scheduler_lease
+    from ai_gateway.scheduler.jobs import SCHEDULE
+
+    import pg_harness as pg
+
+    owner = pg.owner_engine()
+    with owner.begin() as c:
+        c.execute(sa.delete(ai_scheduler_lease))
+        c.execute(
+            sa.insert(ai_scheduler_lease).values(
+                [{"job": job, "last_success_at": sa.func.now()} for job in SCHEDULE]
+            )
+        )
+    try:
+        yield
+    finally:
+        with owner.begin() as c:
+            c.execute(sa.delete(ai_scheduler_lease))
+        owner.dispose()
+
+
+def test_health_is_ok_with_a_synchronised_clock(
+    client: TestClient, scheduler_fresh: None
+) -> None:
     body = client.get(f"{PREFIX}/health/", headers=HEALTH_DETAIL).json()
     assert body["status"] == "ok"
     check = next(c for c in body["checks"] if c["name"] == "clock_skew")

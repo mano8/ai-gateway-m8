@@ -65,6 +65,7 @@ from ai_gateway.controllers.resolution import (
 )
 from ai_gateway.core.errors import GatewayError
 from ai_gateway.core.metrics import QUOTA_REJECTIONS
+from ai_gateway.core.restore_state import assert_not_held
 from ai_gateway.core.identities import embedding_space_id
 from ai_gateway.core.job_context import JobContextPrincipal
 from ai_gateway.db_models._common import ExecutionStatus
@@ -377,6 +378,11 @@ def _bind_spool(
     return execution_id
 
 
+def _budgeted(scopes: list[Scope]) -> bool:
+    """Whether the admission reserves daily-budget units (the restore budget hold)."""
+    return any(scope.daily_units is not None for scope in scopes)
+
+
 def reserve(
     engine: Engine,
     principal: JobContextPrincipal,
@@ -387,8 +393,10 @@ def reserve(
 ) -> Reservation:
     """Run the reservation transaction; a ``pending`` row, or a typed refusal."""
     execution_id = uuid4()
+    scopes = scopes_of(principal, limits)
     with audited_transaction(engine) as tx:
         connection = tx.connection
+        assert_not_held(connection, None, budgeted=_budgeted(scopes))
         resolution = resolve(
             tx, ExecutionRequest.from_context(principal.payload), policy
         )
@@ -399,7 +407,6 @@ def reserve(
         units = job.units(frozen.config)
         principal.redeem(connection)
         day = connection.execute(sa.select(_BUDGET_DAY)).scalar_one()
-        scopes = scopes_of(principal, limits)
         for scope in scopes:
             _reserve_units(connection, scope, day, units)
         values = _pending_values(

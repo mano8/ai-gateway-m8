@@ -5,7 +5,8 @@ A provider-side temporary file is durable state from **before** its first
 upload byte. Every transition is a compare-and-set on the stored status (the
 T16 trigger refuses any other), "closed" means the row is deleted — which
 alone releases the credential-version foreign key — and every scheduler
-transition can carry the scheduler's fence (``T33a``).
+transition can carry the scheduler's fence (``T33a``); the jobs that reach a
+provider per row also take a per-item claim (:class:`ItemClaim`, D-42).
 
 **Handler** (:class:`ExecutionArtifacts`): (a) ``∅ → uploading`` committed
 together with ``first_byte_sent_at`` immediately before the upload's first
@@ -411,6 +412,23 @@ class ArtifactPolicy:
         )
 
 
+class ItemClaim(Protocol):
+    """The scheduler's per-item claim on a row (D-42; ``scheduler.lease.Lease``)."""
+
+    def claimable(self, table: sa.Table) -> sa.ColumnElement[bool]:
+        """No other leader's live claim holds the row, and the lease is live."""
+
+    def claim_values(self) -> dict[str, object]:
+        """``claim_epoch``, ``claim_holder_token`` and ``claim_until``."""
+
+    def held(self, table: sa.Table) -> sa.ColumnElement[bool]:
+        """This leader's live claim on the row, and the live lease."""
+
+
+#: A row another leader holds: the pass leaves it alone.
+_TAKEN: Final = sa.false()
+
+
 def backoff(attempts: int, retry_after: int | None = None) -> timedelta:
     """The wait before the next deletion attempt; a 429's cooldown is a floor."""
     seconds = min(BACKOFF_BASE_SECONDS * 2 ** max(0, attempts - 1), BACKOFF_MAX_SECONDS)
@@ -475,6 +493,30 @@ class ArtifactScheduler:
             status=_S.PENDING_DELETE.value,
             next_attempt_at=sa.func.now(),
         )
+
+    def _claim(
+        self,
+        row: RowMapping,
+        fence: sa.ColumnElement[bool] | None,
+        claim: ItemClaim | None,
+    ) -> sa.ColumnElement[bool] | None:
+        """
+        Claim ``row`` before any provider call; the fence its later CASes carry.
+
+        Without a claim the job's own fence is returned unchanged. With one,
+        a row another leader holds yields :data:`_TAKEN` and is skipped.
+        """
+        if claim is None:
+            return fence
+        if not _cas(
+            self._engine,
+            row["id"],
+            _S(row["status"]),
+            claim.claimable(_A),
+            **claim.claim_values(),
+        ):
+            return _TAKEN
+        return claim.held(_A)
 
     # --- reaching the provider under the recorded version -----------------------
 
@@ -601,16 +643,22 @@ class ArtifactScheduler:
         return False
 
     async def delete_pending(
-        self, fence: sa.ColumnElement[bool] | None = None
+        self,
+        fence: sa.ColumnElement[bool] | None = None,
+        *,
+        claim: ItemClaim | None = None,
     ) -> list[UUID]:
         """(h) delete ``pending_delete`` files until proven; (i) park the exhausted."""
         closed: list[UUID] = []
         for row in self._rows(_S.PENDING_DELETE):
+            item = self._claim(row, fence, claim)
+            if item is _TAKEN:
+                continue
             reason = self._exhausted(row)
             if reason is not None:
-                _park(self._engine, row["id"], _S.PENDING_DELETE, reason, fence)
+                _park(self._engine, row["id"], _S.PENDING_DELETE, reason, item)
                 continue
-            if await self._attempt(row, fence):
+            if await self._attempt(row, item):
                 closed.append(row["id"])
         return closed
 
@@ -625,15 +673,21 @@ class ArtifactScheduler:
         return moment is not None and moment + self._grace < datetime.now(UTC)
 
     async def resolve_unknown(
-        self, fence: sa.ColumnElement[bool] | None = None
+        self,
+        fence: sa.ColumnElement[bool] | None = None,
+        *,
+        claim: ItemClaim | None = None,
     ) -> list[UUID]:
         """Find, or give up on, the files whose id never came back."""
         moved: list[UUID] = []
         for row in self._rows(_S.UPLOADING_UNKNOWN_ID):
-            if await self._resolve_one(row, fence):
+            item = self._claim(row, fence, claim)
+            if item is _TAKEN:
+                continue
+            if await self._resolve_one(row, item):
                 moved.append(row["id"])
             else:
-                self._later(row, _S.UPLOADING_UNKNOWN_ID, RELIST, fence)
+                self._later(row, _S.UPLOADING_UNKNOWN_ID, RELIST, item)
         return moved
 
     def _later(
@@ -716,15 +770,21 @@ class ArtifactScheduler:
     # --- (j)/(k) parked rows ----------------------------------------------------------
 
     async def revisit_parked(
-        self, fence: sa.ColumnElement[bool] | None = None
+        self,
+        fence: sa.ColumnElement[bool] | None = None,
+        *,
+        claim: ItemClaim | None = None,
     ) -> list[UUID]:
         """(j) a later proof closes a parked row; (k) a late listing un-parks one."""
         moved: list[UUID] = []
         for row in self._rows(_S.MANUAL_CLEANUP_REQUIRED):
-            if await self._revisit(row, fence):
+            item = self._claim(row, fence, claim)
+            if item is _TAKEN:
+                continue
+            if await self._revisit(row, item):
                 moved.append(row["id"])
             else:
-                self._later(row, _S.MANUAL_CLEANUP_REQUIRED, self._wait(row), fence)
+                self._later(row, _S.MANUAL_CLEANUP_REQUIRED, self._wait(row), item)
         return moved
 
     @staticmethod
@@ -939,6 +999,7 @@ __all__ = [
     "ArtifactPolicy",
     "ArtifactScheduler",
     "ExecutionArtifacts",
+    "ItemClaim",
     "accept_residual",
     "backoff",
     "file_name",

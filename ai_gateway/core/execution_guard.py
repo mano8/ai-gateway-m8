@@ -10,7 +10,10 @@ be added without it.
 Every execution route also refuses to run while the application and
 database clocks disagree by more than ``AI_MAX_CLOCK_SKEW_SECONDS``: every
 lease and deadline is a database-clock predicate, so a skewed process answers
-the typed ``503 clock_skew_exceeded`` instead (D-24).
+the typed ``503 clock_skew_exceeded`` instead (D-24). It refuses with ``503
+restore_detected`` while its database is behind the spool's high-water or a
+restore is held (:mod:`~ai_gateway.core.restore_state`); the reservation
+transaction re-checks the hold.
 
 :func:`require_job_context`, in order:
 
@@ -45,6 +48,7 @@ from fastapi_m8 import INTERNAL_CLIENT_HEADER, INTERNAL_TOKEN_HEADER
 
 from .errors import GatewayError
 from .job_context import JobContextPrincipal
+from .restore_state import assert_not_held
 
 #: Header carrying the compact signed job context.
 JOB_CONTEXT_HEADER = "X-AI-Job-Context"
@@ -148,13 +152,22 @@ def require_clock_within_bound() -> None:
     clock.require_within_bound()
 
 
+def require_restore_clear() -> None:
+    """Refuse execution while the database is behind its high-water or held."""
+    from ai_gateway.core.deps import db_engine, settings  # noqa: PLC0415
+
+    with db_engine.connect() as connection:
+        assert_not_held(connection, settings.AI_OCR_SPOOL_DIR, budgeted=False)
+
+
 def build_execution_router(
     *, gate: Callable[[], None] | None = None, **kwargs: Any
 ) -> APIRouter:
     """
     Return a router whose every route runs the execution guards.
 
-    The clock-skew guard runs first, then :func:`require_job_context`.
+    The clock-skew guard runs first, then the restore guard, then
+    :func:`require_job_context`.
 
     Parameters
     ----------
@@ -179,7 +192,11 @@ def build_execution_router(
     """
     if "dependencies" in kwargs:
         raise TypeError("execution routers own their dependencies")
-    guards = [Depends(require_clock_within_bound), Depends(require_job_context)]
+    guards = [
+        Depends(require_clock_within_bound),
+        Depends(require_restore_clear),
+        Depends(require_job_context),
+    ]
     if gate is not None:
         guards.insert(0, Depends(gate))
     return APIRouter(dependencies=[*guards, Security(SERVICE_CLIENT_SCHEME)], **kwargs)
@@ -194,5 +211,6 @@ __all__ = [
     "build_execution_router",
     "require_clock_within_bound",
     "require_job_context",
+    "require_restore_clear",
     "route_capability",
 ]

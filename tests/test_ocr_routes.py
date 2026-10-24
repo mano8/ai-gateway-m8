@@ -580,14 +580,20 @@ def test_a_dispatch_of_a_retired_spool_is_refused(
 
 def test_only_the_spool_module_opens_spool_files() -> None:
     root = Path(main.__file__).parent
-    # Key files are not spool files; the start-up check opens only its probe.
+    # Key files are not spool files; the start-up check opens only its probe;
+    # the restore state writes only under /spool/.state, never a data or lock
+    # file (its high-water and event log, T33a).
     openers = {
         str(path.relative_to(root))
         for path in root.rglob("*.py")
         if "os.open(" in (text := path.read_text(encoding="utf-8"))
         and "spool" in text.lower()
     }
-    assert openers == {"execution/spool.py", "core/spool_check.py"}
+    assert openers == {
+        "execution/spool.py",
+        "core/spool_check.py",
+        "core/restore_state.py",
+    }
 
 
 def test_a_dispatch_context_on_the_spool_route_is_refused(

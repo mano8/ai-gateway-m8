@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.pool import StaticPool
 
-from ai_gateway import prestart, scheduler
+from ai_gateway import prestart
 from ai_gateway.core import deps
 
 REVISION = """revision = "{rev}"
@@ -159,7 +159,3 @@ def test_the_revision_check_writes_nothing() -> None:
             text("SELECT name FROM sqlite_master WHERE type='table'")
         ).all()
     assert tables == []
-
-
-def test_the_scheduler_refuses_to_run() -> None:
-    assert scheduler.main() == 1

@@ -19,6 +19,14 @@ once and stamps ``occupancy_released_at``:
   whose reservation was already released (the crash between the release
   commit and the lock unlink), and files whose row is absent; each under
   ``LOCK_EX|LOCK_NB``, a live holder deferring it;
+* :func:`prune_rate_windows` — ``ai_rate_window`` rows older than two
+  windows (no admission reads them again);
+* :func:`repair_occupancy` — each client's in-flight counter recounted from
+  its live rows (``occupancy_released_at IS NULL``) **under the counter
+  row's** ``FOR UPDATE`` **lock with a fresh statement**: an admission or a
+  settlement that touched the counter first is waited for and then counted;
+  one that touches it after waits and applies its ±1 to the repaired value.
+  A snapshot count followed by an unlocked overwrite would lose one;
 * :func:`spool_repair` — the audited superuser release of a row whose lock
   vanished while its reservation is held (``spool_lock_missing``), which
   the protocol cannot produce outside tampering or a restore.
@@ -31,16 +39,24 @@ import logging
 import os
 import uuid
 from collections import Counter as Tally
+from collections.abc import Callable
+from datetime import timedelta
 from uuid import UUID
 
 import sqlalchemy as sa
 from ai_sdk_m8.schemas import AiErrorCode
-from sqlalchemy import Engine
+from sqlalchemy import Connection, Engine
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from ai_gateway.controllers.audit import Actor, audited_transaction
 from ai_gateway.core.job_context import JOB_CONTEXTS
 from ai_gateway.db_models._common import ExecutionStatus
-from ai_gateway.db_models.accounting import ai_execution, ai_job_context_use
+from ai_gateway.db_models.accounting import (
+    ai_client_occupancy,
+    ai_execution,
+    ai_job_context_use,
+    ai_rate_window,
+)
 
 from . import spool
 from .settlement import SWEEP_BATCH, close
@@ -50,14 +66,32 @@ logger = logging.getLogger(__name__)
 
 _E = ai_execution
 _U = ai_job_context_use
+_W = ai_rate_window
+_O = ai_client_occupancy
+
+#: A rate window is one minute; rows older than two windows are pruned.
+RATE_WINDOW: timedelta = timedelta(minutes=1)
 
 
-def sweep_contexts(engine: Engine, *, limit: int = SWEEP_BATCH) -> int:
+def _fenced(
+    where: sa.ColumnElement[bool], fence: sa.ColumnElement[bool] | None
+) -> sa.ColumnElement[bool]:
+    return where if fence is None else sa.and_(where, fence)
+
+
+def sweep_contexts(
+    engine: Engine,
+    *,
+    fence: sa.ColumnElement[bool] | None = None,
+    limit: int = SWEEP_BATCH,
+) -> int:
     """Delete context rows whose ``exp`` passed on the database clock."""
     expired = sa.select(_U.c.iss, _U.c.jti).where(_U.c.exp < sa.func.now()).limit(limit)
     with engine.begin() as connection:
         deleted = connection.execute(
-            sa.delete(_U).where(sa.tuple_(_U.c.iss, _U.c.jti).in_(expired))
+            sa.delete(_U).where(
+                _fenced(sa.tuple_(_U.c.iss, _U.c.jti).in_(expired), fence)
+            )
         ).rowcount
     JOB_CONTEXTS.labels(event="swept").inc(deleted)
     return int(deleted)
@@ -92,6 +126,85 @@ def sweep_spools(
             status=ExecutionStatus.ABANDONED,
             error=AiErrorCode.TIMEOUT,
         )
+
+
+def prune_rate_windows(
+    engine: Engine, *, fence: sa.ColumnElement[bool] | None = None
+) -> int:
+    """Delete rate-window rows older than two windows; the count."""
+    current = sa.func.date_trunc("minute", sa.func.now())
+    with engine.begin() as connection:
+        return int(
+            connection.execute(
+                sa.delete(_W).where(
+                    _fenced(_W.c.window_start < current - 2 * RATE_WINDOW, fence)
+                )
+            ).rowcount
+        )
+
+
+def _live(client_id: str) -> sa.Select[int]:
+    return sa.select(sa.func.count()).where(
+        _E.c.client_scope_id == client_id, _E.c.occupancy_released_at.is_(None)
+    )
+
+
+def _repair_one(
+    connection: Connection,
+    client_id: str,
+    fence: sa.ColumnElement[bool] | None,
+    pause: Callable[[str], None],
+) -> int | None:
+    """Recount one client under its counter row's lock; the change, if fenced."""
+    connection.execute(
+        pg_insert(_O).values(client_id=client_id, occupied=0).on_conflict_do_nothing()
+    )
+    locked = connection.execute(
+        sa.select(_O.c.occupied)
+        .where(_fenced(_O.c.client_id == client_id, fence))
+        .with_for_update()
+    ).first()
+    if locked is None:
+        return None  # the lease moved on: change nothing
+    pause("locked")
+    # A fresh statement, after the lock: it sees every committed ±1.
+    live = int(connection.execute(_live(client_id)).scalar_one())
+    pause("counted")
+    connection.execute(
+        sa.update(_O).where(_O.c.client_id == client_id).values(occupied=live)
+    )
+    return live - int(locked[0])
+
+
+def repair_occupancy(
+    engine: Engine,
+    *,
+    fence: sa.ColumnElement[bool] | None = None,
+    pause: Callable[[str], None] = lambda _step: None,
+) -> dict[str, int]:
+    """
+    Recount every client's in-flight counter from its live rows.
+
+    Returns the clients whose counter changed and by how much. ``pause`` is
+    a test seam called after the lock and after the count.
+    """
+    with engine.connect() as connection:
+        clients = set(connection.execute(sa.select(_O.c.client_id)).scalars())
+        clients |= set(
+            connection.execute(
+                sa.select(_E.c.client_scope_id)
+                .where(_E.c.occupancy_released_at.is_(None))
+                .distinct()
+            ).scalars()
+        )
+    changed: dict[str, int] = {}
+    for client_id in sorted(clients):
+        with engine.begin() as connection:
+            delta = _repair_one(connection, client_id, fence, pause)
+        if delta:
+            logger.warning("occupancy.repaired client_id=%s delta=%d", client_id, delta)
+            changed[client_id] = delta
+    return changed
 
 
 def clean_spools(
@@ -194,6 +307,8 @@ def spool_repair(
 __all__ = [
     "clean_spools",
     "collect_orphans",
+    "prune_rate_windows",
+    "repair_occupancy",
     "spool_repair",
     "sweep_contexts",
     "sweep_spools",

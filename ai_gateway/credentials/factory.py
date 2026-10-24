@@ -57,12 +57,15 @@ def build_credential_store(
             "AI_CREDENTIAL_STORAGE_BACKEND=vault is not served by this build"
         )
     fingerprint_key = settings.fingerprint_key
-    if fingerprint_key is None:  # the settings refuse this at boot
+    if fingerprint_key is None and not settings.is_scheduler:
+        # the settings refuse this at boot; the scheduler never fingerprints
         raise UnsupportedBackendError("the database backend needs a fingerprint key")
     return DatabaseCredentialStore(
         engine,
         _kek_provider(settings),
-        FingerprintKeys(fingerprint_key, settings.previous_fingerprint_key),
+        None
+        if fingerprint_key is None
+        else FingerprintKeys(fingerprint_key, settings.previous_fingerprint_key),
         resolve_timeout_seconds=settings.AI_CREDENTIAL_RESOLVE_TIMEOUT_SECONDS,
     )
 

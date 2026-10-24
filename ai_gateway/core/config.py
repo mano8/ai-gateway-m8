@@ -167,6 +167,12 @@ class Settings(ConsumerServiceSettings):
     # that differs from the database's recorded installation.
     AI_DEPLOYMENT_ID: UUID
 
+    # ── Run-mode ─────────────────────────────────────────────────────────────
+    # ``scheduler`` is set by ``python -m ai_gateway.scheduler`` and its start
+    # script, never in the shared env file: that process neither needs nor
+    # reads the fingerprint key or the OCR receipt seed (D-42).
+    AI_RUN_MODE: Literal["web", "scheduler"] = "web"
+
     # ── Credential storage and key encryption ────────────────────────────────
     AI_CREDENTIAL_STORAGE_BACKEND: Literal["database", "vault"]
     AI_CREDENTIAL_KEK_PROVIDER: Literal["local", "vault_transit"] | None = None
@@ -327,6 +333,11 @@ class Settings(ConsumerServiceSettings):
         return f"ai-gateway/{self.deployment_id}"
 
     @property
+    def is_scheduler(self) -> bool:
+        """The scheduler run-mode: no fingerprint key, no receipt seed (D-42)."""
+        return self.AI_RUN_MODE == "scheduler"
+
+    @property
     def kek(self) -> KeyMaterial | None:
         """The active local KEK (``database`` backend, ``local`` provider)."""
         return self._kek
@@ -453,12 +464,17 @@ class Settings(ConsumerServiceSettings):
             self._require("AI_VAULT_KV_MOUNT", "AI_VAULT_KV_PATH_PREFIX")
             self._check_vault_access()
             return self
+        self._check_database_backend()
+        return self
+
+    def _check_database_backend(self) -> None:
         if self.AI_CREDENTIAL_KEK_PROVIDER is None:
             raise ValueError(
                 "the database backend needs AI_CREDENTIAL_KEK_PROVIDER "
                 "(local or vault_transit)"
             )
-        self._require("AI_CREDENTIAL_FINGERPRINT_KEY_FILE")
+        if not self.is_scheduler:  # the scheduler never fingerprints (D-42)
+            self._require("AI_CREDENTIAL_FINGERPRINT_KEY_FILE")
         if self.AI_CREDENTIAL_KEK_PROVIDER == "local":
             self._require("AI_CREDENTIAL_KEK_FILE")
         else:
@@ -468,7 +484,6 @@ class Settings(ConsumerServiceSettings):
                 )
             self._require("AI_VAULT_TRANSIT_MOUNT", "AI_VAULT_TRANSIT_KEY")
             self._check_vault_access()
-        return self
 
     def _require(self, *names: str) -> None:
         missing = [name for name in names if not getattr(self, name)]
@@ -516,6 +531,8 @@ class Settings(ConsumerServiceSettings):
             )
 
     def _load_fingerprint_and_receipt_keys(self) -> None:
+        if self.is_scheduler:
+            return  # mounted on the web service only (D-42)
         if self.AI_CREDENTIAL_FINGERPRINT_KEY_FILE:
             self._fingerprint_key = load_key_file(
                 self.AI_CREDENTIAL_FINGERPRINT_KEY_FILE,
@@ -587,16 +604,24 @@ class Settings(ConsumerServiceSettings):
             seen[raw] = name
         return self
 
+    def _receipt_seed_missing(self) -> bool:
+        """OCR on the web service without a seed (the scheduler signs nothing)."""
+        return (
+            Capability.OCR in self._capabilities
+            and self._receipt_seed is None
+            and not self.is_scheduler
+        )
+
     @model_validator(mode="after")
     def _check_receipts_and_issuer_keys(self) -> Settings:
         """Receipts need a seed when OCR is on; no key serves two purposes."""
-        if Capability.OCR in self._capabilities and self._receipt_seed is None:
+        if self._receipt_seed_missing():
             raise ValueError(
                 "ocr in AI_CAPABILITIES_ENABLED needs a readable, mode-safe "
                 "AI_EXECUTION_RECEIPT_KEY_FILE"
             )
         if self._receipt_seed is None:
-            if self.AI_EXECUTION_RECEIPT_KID is not None:
+            if self.AI_EXECUTION_RECEIPT_KID is not None and not self.is_scheduler:
                 raise ValueError(
                     "AI_EXECUTION_RECEIPT_KID is set without AI_EXECUTION_RECEIPT_KEY_FILE"
                 )

@@ -124,6 +124,7 @@ def test_the_env_template_lists_every_gateway_key() -> None:
 def test_every_gateway_placeholder_is_changethis() -> None:
     keys = _example_keys()
     assert keys.pop("AI_RESTRICTED_OCR_RESTORE_RESIDUAL_ACCEPTED") is None
+    assert keys.pop("AI_RUN_MODE") is None  # set by the scheduler's command only
     assert set(keys.values()) == {"changethis"}
 
 

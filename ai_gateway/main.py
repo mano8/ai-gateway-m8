@@ -32,6 +32,8 @@ from .core.events import make_lifespan_extras
 from .core.meta import install_gateway_meta
 from .core.spool_check import assert_local_spool
 from .installation import check_installation
+from .scheduler.jobs import expected_jobs
+from .scheduler.runner import last_successes
 
 
 async def check_db() -> HealthCheckResult:
@@ -72,6 +74,35 @@ async def check_user_bindings() -> HealthCheckResult:
         status=HealthStatus.DEGRADED if held else HealthStatus.OK,
         meta={"user_byok_enabled": False, "held_unavailable": held},
     )
+
+
+async def check_scheduler() -> HealthCheckResult:
+    """
+    D-42: the age of each scheduler job's last successful run.
+
+    Degraded while any job this deployment runs has never succeeded or last
+    succeeded longer ago than its threshold (a stuck or missing scheduler).
+    """
+    try:
+        ages = last_successes(engine._engine)
+    except Exception as exc:
+        return HealthCheckResult(
+            name="scheduler", status=HealthStatus.FAIL, error=type(exc).__name__
+        )
+    expected = expected_jobs(spool=settings.AI_OCR_SPOOL_DIR is not None)
+    seconds = {name: _whole(ages.get(name)) for name in sorted(expected)}
+    late = [
+        name for name, age in seconds.items() if age is None or age > expected[name]
+    ]
+    return HealthCheckResult(
+        name="scheduler",
+        status=HealthStatus.DEGRADED if late else HealthStatus.OK,
+        meta={"last_success_age_seconds": seconds, "late": late},
+    )
+
+
+def _whole(age: float | None) -> int | None:
+    return None if age is None else int(age)
 
 
 async def check_spool_filesystem() -> None:
@@ -148,6 +179,7 @@ def build_app(app_settings: Settings) -> FastAPI:
                 clock.health_check,
                 credential_store.health,
                 check_user_bindings,
+                check_scheduler,
             ]
         ),
         lifecycle=AppLifecycle(

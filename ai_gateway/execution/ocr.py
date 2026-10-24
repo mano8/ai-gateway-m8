@@ -45,6 +45,7 @@ from sqlalchemy import Connection, Engine
 
 from ai_gateway.core.errors import GatewayError
 from ai_gateway.core.job_context import JobContextPrincipal
+from ai_gateway.core.restore_state import assert_not_held
 from ai_gateway.db_models._common import ExecutionStatus
 from ai_gateway.db_models.accounting import ai_execution, ai_spool_capacity
 
@@ -151,6 +152,7 @@ def open_spool(
     size = reserved_size(input_bytes, unit)
     execution_id = uuid.uuid4()
     with engine.begin() as connection:
+        assert_not_held(connection, None, budgeted=False)  # no budget before phase 2
         principal.redeem(connection)
         admit(connection, principal.client_id, scopes_of(principal, limits), limits)
         _reserve_capacity(connection, size, config)
