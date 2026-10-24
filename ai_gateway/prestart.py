@@ -1,11 +1,17 @@
 """
 Pre-start checks for the web and scheduler run-modes.
 
-Two checks, in order, and nothing else:
+The checks, in order, and nothing else:
 
-1. wait until the database answers a trivial ``SELECT``;
-2. read ``alembic_version_ai`` (read-only, as the runtime role) and exit
-   unless it equals the head packaged in this image.
+1. the OCR spool, when configured, is on a local filesystem whose locks
+   exclude (D-45);
+2. wait until the database answers a trivial ``SELECT``;
+3. read ``alembic_version_ai`` (read-only, as the runtime role) and exit
+   unless it equals the head packaged in this image;
+4. exit unless the database records this ``AI_DEPLOYMENT_ID`` as its
+   installation;
+5. exit unless this replica holds every KEK and fingerprint-key generation a
+   stored credential version needs (D-23), naming the missing ones.
 
 The run-modes never execute Alembic: no ``upgrade``, no autogenerate, no DDL.
 Migrations run only through the ``ai-migrate`` one-shot
@@ -139,7 +145,7 @@ def wait_for_db(engine: Engine) -> None:
 
 def main() -> int:
     """
-    Run both checks against the service engine.
+    Run the start-up checks.
 
     Returns
     -------
@@ -148,10 +154,42 @@ def main() -> int:
         otherwise.
 
     """
+    from ai_gateway.core.config import settings  # noqa: PLC0415
     from ai_gateway.core.deps import engine  # noqa: PLC0415
+    from ai_gateway.core.spool_check import (  # noqa: PLC0415
+        SpoolFilesystemError,
+        assert_local_spool,
+    )
+
+    if settings.AI_OCR_SPOOL_DIR is not None:
+        try:
+            assert_local_spool(settings.AI_OCR_SPOOL_DIR)
+        except SpoolFilesystemError as exc:
+            logger.error("spool check failed: %s", exc)
+            return 1
+    from ai_gateway.installation import (  # noqa: PLC0415
+        InstallationError,
+        check_installation,
+    )
 
     wait_for_db(engine._engine)
-    return 0 if check_schema_revision(engine._engine, packaged_head()) else 1
+    if not check_schema_revision(engine._engine, packaged_head()):
+        return 1
+    try:
+        check_installation(engine._engine, settings.AI_DEPLOYMENT_ID)
+    except InstallationError as exc:
+        logger.error("%s", exc)
+        return 1
+    from ai_gateway.core.deps import credential_store  # noqa: PLC0415
+    from ai_gateway.credentials.database import KeyCoverageError  # noqa: PLC0415
+
+    try:
+        with engine._engine.connect() as connection:
+            credential_store.check_coverage(connection)
+    except KeyCoverageError as exc:
+        logger.error("%s", exc)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":  # pragma: no cover

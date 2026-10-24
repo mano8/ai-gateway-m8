@@ -1,14 +1,24 @@
 # The gateway is PostgreSQL-only (its own ai_db), so fastapi-m8 is taken with
 # the db and postgres extras alone.
 #
-# fastapi-m8 floor: 4.5.1, the current release. The service-client guard and
-# the internal-header re-exports the gateway's execution routes need ship in a
-# later additive fastapi-m8 minor; the floor moves to it, with a narrow
-# `pip-compile --upgrade-package fastapi-m8` lock move, once it is published.
-fastapi-m8[db,postgres]>=4.5.1,<5.0.0
+# fastapi-m8 floor: 4.6.0, the minor that adds build_service_client_guard and
+# re-exports the consumer credential registry and the internal header names.
+# ai-sdk-m8 0.2.0 carries the signed-object rule (jobcontext extra), the C-01
+# schemas and the management wire models. Both are pinned in the hash lock with
+# a narrow `pip-compile --upgrade-package` move once each is on PyPI.
+fastapi-m8[db,postgres]>=4.6.0,<5.0.0
+ai-sdk-m8[jobcontext]>=0.2.0,<0.3.0
 uvicorn>=0.52.1
 
 alembic>=1.18.4
+
+# Envelope encryption of provider credentials (AES-256-GCM, D-23); the fleet
+# floor auth-sdk-m8 already requires.
+cryptography>=48.0.1
+
+# Vault: the transit KEK (T23) and the KV store (T24), on a dedicated
+# requests session (D-20).
+hvac>=2.3.0
 
 pydantic>=2.13.4
 pydantic_settings>=2.14.2

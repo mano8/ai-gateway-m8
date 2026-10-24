@@ -1,0 +1,2 @@
+# Configuration comes from the service environment (env_file); secrets from
+# Docker secrets through <FIELD>_FILE. This file only satisfies the .env search.

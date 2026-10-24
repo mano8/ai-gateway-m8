@@ -1,0 +1,184 @@
+# vault_prod_template — the gateway against an EXTERNAL, production Vault (T87).
+#
+# Reference template, not runnable as-is: merge these three services into the
+# deployment's own stack, which provides m8_db (with the D-04 roles from
+# shared/scripts/db-init.sh), the issuer, Traefik and the networks.
+#
+# Differences from vault_transit_m8 / vault_kv_m8:
+#   * no vault or vault-init service: Vault is long-lived infrastructure with
+#     its own lifecycle (vault/config/vault.hcl: Raft storage, TLS);
+#   * no root token and no unseal key anywhere in this stack; the operator
+#     uses the root token once at setup (README) and revokes it;
+#   * AI_VAULT_ADDR is https and AI_VAULT_CA_FILE names the CA that signs
+#     Vault's certificate; the gateway verifies TLS and never follows a
+#     redirect (D-20);
+#   * the AppRole role_id and secret_id arrive as Docker secrets, delivered
+#     by the deployment's secrets pipeline (or a Vault Agent that writes them),
+#     never as environment values.
+#
+# The gateway services keep every rule of the runnable stacks; the compose
+# policy test (tests/test_compose_policy.py) checks this file too.
+
+name: ai-gateway-vault-prod
+
+x-gateway-hardening: &gateway-hardening
+  image: tepochtli/ai-gateway-m8:<pinned-version>   # a released tag or digest, never latest
+  user: "1000:1000"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+  env_file: [./gateway.env]
+  configs:
+    - source: environment_only_dotenv
+      target: /opt/ai_gateway/.env
+
+services:
+  ai-migrate:
+    <<: *gateway-hardening
+    command: ["./ai_gateway/scripts/ai_migrate.sh"]
+    environment:
+      AI_RUN_MODE: scheduler
+      DB_USER: ai_owner
+      DB_PASSWORD_FILE: /run/secrets/ai_owner_db_password
+    secrets:
+      - ai_deployment_id
+      - ai_owner_db_password
+      - vault_ca.pem
+      - vault_role_id
+      - vault_secret_id
+      - ai_service_clients.json
+      - gateway_secret_key
+      - gateway_access_secret_key
+      - gateway_refresh_secret_key
+      - gateway_private_api_secret
+      - event_signing_key
+      - health_detail_credential
+      - metrics_scrape_credential
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          pids: 128
+    restart: "no"
+    networks: [data_net]
+
+  ai_gateway:
+    <<: *gateway-hardening
+    secrets:
+      - ai_deployment_id
+      - ai_runtime_db_password
+      - vault_ca.pem
+      - vault_role_id
+      - vault_secret_id
+      - ai_fingerprint_key
+      - ai_receipt_seed
+      - ai_service_clients.json
+      - gateway_secret_key
+      - gateway_access_secret_key
+      - gateway_refresh_secret_key
+      - gateway_private_api_secret
+      - event_signing_key
+      - health_detail_credential
+      - metrics_scrape_credential
+    volumes:
+      - ai_spool:/spool
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          pids: 256
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request as u; u.urlopen(u.Request('http://127.0.0.1:8000/ai/health/', headers={'X-Internal-Token': open('/run/secrets/health_detail_credential').read().strip()}), timeout=8)"
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 60s
+    depends_on:
+      ai-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks: [app_net, data_net, ai_net, ai_egress]
+
+  ai_gateway_scheduler:
+    <<: *gateway-hardening
+    command: ["./ai_gateway/scripts/scheduler_start.sh"]
+    secrets:
+      - ai_deployment_id
+      - ai_runtime_db_password
+      - vault_ca.pem
+      - vault_role_id
+      - vault_secret_id
+      - ai_service_clients.json
+      - gateway_secret_key
+      - gateway_access_secret_key
+      - gateway_refresh_secret_key
+      - gateway_private_api_secret
+      - event_signing_key
+      - health_detail_credential
+      - metrics_scrape_credential
+    volumes:
+      - ai_spool:/spool
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 512M
+          pids: 128
+    healthcheck:
+      test: ["CMD", "python", "-m", "ai_gateway.scheduler", "--healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 4
+      start_period: 60s
+    depends_on:
+      ai-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks: [data_net, ai_net, ai_egress]
+
+networks:
+  app_net:
+    internal: true
+  data_net:
+    internal: true
+  ai_net:
+    internal: true
+  # The gateway's egress: external providers and the external Vault.
+  ai_egress: {}
+
+configs:
+  environment_only_dotenv:
+    file: ../shared/environment-only.dotenv
+
+volumes:
+  # Size the filesystem behind this volume; the label declares that size.
+  ai_spool:
+    driver: local
+    labels:
+      org.m8.ai-spool.size-bytes: "4294967296"
+
+# Every file comes from the deployment's secrets pipeline, mode 0400, owned by
+# uid 1000 (the gateway's), never committed.
+secrets:
+  ai_deployment_id: {file: ./secrets/ai_deployment_id}
+  ai_owner_db_password: {file: ./secrets/ai_owner_db_password}
+  ai_runtime_db_password: {file: ./secrets/ai_runtime_db_password}
+  vault_ca.pem: {file: ./secrets/vault_ca.pem}
+  vault_role_id: {file: ./secrets/vault_role_id}
+  vault_secret_id: {file: ./secrets/vault_secret_id}
+  ai_fingerprint_key: {file: ./secrets/ai_fingerprint_key}
+  ai_receipt_seed: {file: ./secrets/ai_receipt_seed}
+  ai_service_clients.json: {file: ./secrets/ai_service_clients.json}
+  gateway_secret_key: {file: ./secrets/gateway_secret_key}
+  gateway_access_secret_key: {file: ./secrets/gateway_access_secret_key}
+  gateway_refresh_secret_key: {file: ./secrets/gateway_refresh_secret_key}
+  gateway_private_api_secret: {file: ./secrets/gateway_private_api_secret}
+  event_signing_key: {file: ./secrets/event_signing_key}
+  health_detail_credential: {file: ./secrets/health_detail_credential}
+  metrics_scrape_credential: {file: ./secrets/metrics_scrape_credential}

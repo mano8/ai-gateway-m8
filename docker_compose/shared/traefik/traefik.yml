@@ -1,0 +1,38 @@
+# Static configuration for every runnable gateway stack (T87).
+#
+# Two entryPoints:
+#   websecure  the public router (HTTPS). It blocks the gateway's service-only
+#              and diagnostic prefixes and strips the internal headers (D-21).
+#   api        everything, unfiltered: the in-network service path. The stacks
+#              publish it on 127.0.0.1 only, as a stand-in for callers on
+#              app_net (the T88 suite, a co-located service). Never bind it to
+#              a LAN or public address.
+#
+# No Docker provider and no Docker socket: routes come only from the file
+# provider (dynamic_conf.yml). The dashboard and api@internal are not exposed.
+
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+log:
+  level: WARN
+
+accessLog: {}
+
+api:
+  dashboard: false
+  insecure: false
+
+entryPoints:
+  websecure:
+    address: ":8443"
+    http:
+      tls: {}
+  api:
+    address: ":9000"
+
+providers:
+  file:
+    filename: /etc/traefik/dynamic_conf.yml
+    watch: false

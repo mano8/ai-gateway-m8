@@ -1,0 +1,472 @@
+# vault_transit_m8 — the gateway alone, production posture, Vault transit KEK (T87).
+#
+# Credentials envelope-encrypted in ai_db (database backend); each data key is
+# wrapped by a Vault transit key (AI_CREDENTIAL_KEK_PROVIDER=vault_transit), so
+# no KEK file exists on this host: the "Hardened Vault" profile's recommended
+# backend. The gateway logs in with an AppRole over TLS.
+#
+# The bundled Vault is LEARNING-ONLY (shared/vault/vault.hcl and
+# shared/scripts/vault-bootstrap.sh): persistent storage and TLS, but one unseal
+# share and the root token kept in a volume beside it. Production uses an
+# external Vault: vault_prod_template. A T88 target.
+
+name: ai-gateway-vault-transit-m8
+
+x-gateway-build: &gateway-build
+  context: ../..
+  dockerfile: ai_gateway/Dockerfile
+
+x-gateway-hardening: &gateway-hardening
+  user: "1000:1000"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+
+services:
+  # One-shot ownership fixes, before anything reads a secret or the spool.
+  # Compose (outside swarm) bind-mounts file secrets with their host owner and
+  # mode, and the gateway refuses a key file with group or other bits, so the
+  # files are handed to the uid that reads them: postgres_password to the
+  # postgres image (70), everything else to 1000. Named volumes start
+  # root-owned; the spool and the issuer's migrations go to 1000.
+  perms-init:
+    image: alpine:3.22
+    command:
+      - sh
+      - -ec
+      - |
+        chown -R 1000:1000 /secrets /spool /auth_migrations /vault_data /vault_bootstrap /vault_approle
+        find /secrets -type f -exec chmod 0400 {} +
+        chown 70:70 /secrets/postgres_password
+        chmod 0700 /spool /vault_data /vault_bootstrap /vault_approle
+        echo "==> perms-init: secrets, spool and migrations owned by their readers"
+    volumes:
+      - ./secrets:/secrets
+      - ai_spool:/spool
+      - auth_migrations:/auth_migrations
+      - vault_data:/vault_data
+      - vault_bootstrap:/vault_bootstrap
+      - vault_approle:/vault_approle
+    # Handing files to another uid needs CAP_CHOWN; that (plus reading and
+    # re-running over converted files) is all this one-shot keeps.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER, DAC_OVERRIDE]
+    security_opt: ["no-new-privileges:true"]
+    network_mode: none
+    read_only: true
+    restart: "no"
+
+  traefik:
+    image: traefik:v3.7.5
+    ports:
+      - "${PUBLIC_BIND_IP:-127.0.0.1}:${PUBLIC_HTTPS_PORT:-4431}:8443"
+      - "127.0.0.1:${API_PORT:-18080}:9000"
+    volumes:
+      - ../shared/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ../shared/traefik/dynamic_conf.yml:/etc/traefik/dynamic_conf.yml:ro
+    secrets: [traefik_tls.crt, traefik_tls.key]
+    # Unprivileged ports, so Traefik runs as the secrets' uid with no capability.
+    user: "1000:1000"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    depends_on:
+      perms-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks: [edge_net, app_net]
+
+  m8_db:
+    image: postgres:18.4-alpine
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes:
+      - db_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+      start_interval: 2s
+    depends_on:
+      perms-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks: [data_net]
+
+  # Roles and databases (D-04), re-synced on every start; never drops.
+  db-init:
+    image: postgres:18.4-alpine
+    entrypoint: ["/bin/sh", "/db-init.sh"]
+    environment:
+      AUTH_DB_USER: auth_user
+      AUTH_DB_NAME: auth_db
+    secrets:
+      [postgres_password, ai_owner_db_password, ai_runtime_db_password, auth_db_password]
+    volumes:
+      - ../shared/scripts/db-init.sh:/db-init.sh:ro
+    # Root only to read secrets owned by other uids (DAC_READ_SEARCH); nothing else.
+    cap_drop: [ALL]
+    cap_add: [DAC_READ_SEARCH]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    depends_on:
+      m8_db:
+        condition: service_healthy
+    restart: "no"
+    networks: [data_net]
+
+  redis_cache:
+    image: redis:8.8.0-alpine
+    command:
+      - sh
+      - -ec
+      - |
+        REDIS_PASSWORD="$$(cat /run/secrets/redis_password)"
+        export REDISCLI_AUTH="$$REDIS_PASSWORD"
+        redis-server --save "" --appendonly no --loglevel warning --requirepass "$$REDIS_PASSWORD" &
+        until redis-cli ping 2>/dev/null | grep -q PONG; do sleep 0.2; done
+        redis-cli ACL SETUSER auth on \>"$$REDIS_PASSWORD" "~oauth_session:*" "~auth_code:*" "~login:*" "~refresh:*" "~exchange:*" "~rt:*" "~jwt:blacklist:*" "~rate:*" "~api_key:*" "~introspect:*" "~security:*" +@read +@write +@transaction +@connection +eval -@dangerous "+client|setinfo" >/dev/null
+        redis-cli ACL SETUSER default on \>"$$REDIS_PASSWORD" resetkeys -@all +@connection -@dangerous >/dev/null
+        wait
+    secrets: [redis_password]
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$(cat /run/secrets/redis_password) redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      perms-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks: [data_net]
+
+  # LEARNING-ONLY Vault (server mode, file storage, TLS from the stack CA).
+  vault:
+    image: hashicorp/vault:1.21.0
+    entrypoint: ["vault"]
+    command: ["server", "-config=/vault/config/vault.hcl"]
+    configs:
+      - source: vault_config
+        target: /vault/config/vault.hcl
+    secrets: [vault_tls.crt, vault_tls.key]
+    volumes:
+      - vault_data:/vault/file
+    environment:
+      VAULT_ADDR: https://127.0.0.1:8200
+      SKIP_SETCAP: "true"
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          pids: 128
+    depends_on:
+      perms-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks: [data_net]
+
+  # Initialise (once), unseal, configure transit and the gateway's AppRole.
+  vault-init:
+    image: hashicorp/vault:1.21.0
+    entrypoint: ["/bin/sh", "/vault-bootstrap.sh"]
+    environment:
+      VAULT_ADDR: https://vault:8200
+      VAULT_CACERT: /run/secrets/stack_ca.pem
+      AI_VAULT_ENGINE: transit
+      AI_VAULT_TRANSIT_MOUNT: transit
+      AI_VAULT_TRANSIT_KEY: ai-gateway-kek
+    secrets: [stack_ca.pem]
+    volumes:
+      - ../shared/scripts/vault-bootstrap.sh:/vault-bootstrap.sh:ro
+      - vault_bootstrap:/vault/bootstrap
+      - vault_approle:/vault/approle
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:size=4m,mode=1777
+    depends_on:
+      vault:
+        condition: service_started
+    restart: "no"
+    networks: [data_net]
+
+  # The issuer (fa-auth-m8): users, JWKS, revocation and the event stream.
+  # Stack configuration only: the gateway is one PRIVATE_API_CONSUMERS row.
+  auth_user_service:
+    image: tepochtli/fa-auth-m8:2.2.3
+    env_file: [./auth.env]
+    configs:
+      - source: environment_only_dotenv
+        target: /opt/auth_user_service/.env
+    environment:
+      DB_PASSWORD_FILE: /run/secrets/auth_db_password
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+      REFRESH_SECRET_KEY_FILE: /run/secrets/issuer_refresh_secret_key
+      FIRST_SUPERUSER_PASSWORD_FILE: /run/secrets/issuer_superuser_password
+      PRIVATE_API_SECRET_FILE: /run/secrets/issuer_private_api_secret
+      SESSION_SECRET_FILE: /run/secrets/issuer_session_secret
+      TOKENS_ENCRYPTION_KEY_FILE: /run/secrets/issuer_tokens_encryption_key
+      EVENT_SIGNING_KEY_FILE: /run/secrets/event_signing_key
+      ACCESS_PRIVATE_KEY_FILE: /run/secrets/issuer_private_key.pem
+      ACCESS_PUBLIC_KEY_FILE: /run/secrets/issuer_public_key.pem
+    secrets:
+      - auth_db_password
+      - redis_password
+      - issuer_refresh_secret_key
+      - issuer_superuser_password
+      - issuer_private_api_secret
+      - issuer_session_secret
+      - issuer_tokens_encryption_key
+      - event_signing_key
+      - issuer_private_key.pem
+      - issuer_public_key.pem
+    volumes:
+      - auth_migrations:/opt/shared_migrations
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          pids: 256
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/user/health/', timeout=4)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      redis_cache:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [app_net, data_net]
+
+  # The only service that executes Alembic (D-04), as ai_owner, then records
+  # or verifies AI_DEPLOYMENT_ID. It runs with the scheduler's settings view
+  # (AI_RUN_MODE=scheduler), so it neither needs nor holds the fingerprint key
+  # or the receipt seed; it never receives the ai_runtime password.
+  ai-migrate:
+    <<: *gateway-hardening
+    build: *gateway-build
+    image: ai-gateway-m8:stack
+    command: ["./ai_gateway/scripts/ai_migrate.sh"]
+    env_file: [./gateway.env]
+    configs:
+      - source: environment_only_dotenv
+        target: /opt/ai_gateway/.env
+    environment:
+      AI_RUN_MODE: scheduler
+      DB_USER: ai_owner
+      DB_PASSWORD_FILE: /run/secrets/ai_owner_db_password
+    secrets:
+      - ai_deployment_id
+      - ai_owner_db_password
+      - stack_ca.pem
+      - ai_service_clients.json
+      - gateway_secret_key
+      - gateway_access_secret_key
+      - gateway_refresh_secret_key
+      - gateway_private_api_secret
+      - event_signing_key
+      - health_detail_credential
+      - metrics_scrape_credential
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          pids: 128
+    volumes:
+      - vault_approle:/run/vault:ro
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      vault-init:
+        condition: service_completed_successfully
+    restart: "no"
+    networks: [data_net]
+
+  ai_gateway:
+    <<: *gateway-hardening
+    build: *gateway-build
+    image: ai-gateway-m8:stack
+    env_file: [./gateway.env]
+    configs:
+      - source: environment_only_dotenv
+        target: /opt/ai_gateway/.env
+    secrets:
+      - ai_deployment_id
+      - ai_runtime_db_password
+      - stack_ca.pem
+      - ai_fingerprint_key
+      - ai_receipt_seed
+      - ai_service_clients.json
+      - gateway_secret_key
+      - gateway_access_secret_key
+      - gateway_refresh_secret_key
+      - gateway_private_api_secret
+      - event_signing_key
+      - health_detail_credential
+      - metrics_scrape_credential
+    volumes:
+      - ai_spool:/spool
+      - vault_approle:/run/vault:ro
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          pids: 256
+    # The credentialed detail, so a failing check (database, clock skew, the
+    # KEK probe) turns the container unhealthy; the public /health is shallow.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request as u; u.urlopen(u.Request('http://127.0.0.1:8000/ai/health/', headers={'X-Internal-Token': open('/run/secrets/health_detail_credential').read().strip()}), timeout=8)"
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 60s
+    depends_on:
+      ai-migrate:
+        condition: service_completed_successfully
+      vault-init:
+        condition: service_completed_successfully
+      auth_user_service:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [app_net, data_net, ai_net, ai_egress]
+
+  # Scheduler run-mode (D-42): same image and env_file, command override; no
+  # receipt seed, no fingerprint key, no app_net, no published port.
+  ai_gateway_scheduler:
+    <<: *gateway-hardening
+    build: *gateway-build
+    image: ai-gateway-m8:stack
+    command: ["./ai_gateway/scripts/scheduler_start.sh"]
+    env_file: [./gateway.env]
+    configs:
+      - source: environment_only_dotenv
+        target: /opt/ai_gateway/.env
+    secrets:
+      - ai_deployment_id
+      - ai_runtime_db_password
+      - stack_ca.pem
+      - ai_service_clients.json
+      - gateway_secret_key
+      - gateway_access_secret_key
+      - gateway_refresh_secret_key
+      - gateway_private_api_secret
+      - event_signing_key
+      - health_detail_credential
+      - metrics_scrape_credential
+    volumes:
+      - ai_spool:/spool
+      - vault_approle:/run/vault:ro
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 512M
+          pids: 128
+    healthcheck:
+      test: ["CMD", "python", "-m", "ai_gateway.scheduler", "--healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 4
+      start_period: 60s
+    depends_on:
+      ai-migrate:
+        condition: service_completed_successfully
+      vault-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks: [data_net, ai_net, ai_egress]
+
+networks:
+  # The only non-internal networks: edge_net (Traefik's published ports) and
+  # ai_egress (the gateway web and scheduler, for external providers).
+  edge_net: {}
+  app_net:
+    internal: true
+  data_net:
+    internal: true
+  ai_net:
+    internal: true
+  ai_egress: {}
+
+# Both images refuse to start without a .env file on their search path, and
+# their <FIELD>_FILE keys are read only from the process environment. This
+# empty, read-only config satisfies the search; every value comes from
+# env_file and every secret from a Docker secret.
+configs:
+  environment_only_dotenv:
+    file: ../shared/environment-only.dotenv
+  vault_config:
+    file: ../shared/vault/vault.hcl
+
+volumes:
+  db_data: {}
+  auth_migrations: {}
+  vault_data: {}
+  # LEARNING-ONLY: the unseal share and root token (vault-init only).
+  vault_bootstrap: {}
+  # The gateway's AppRole role_id and secret_id (read-only on the gateway).
+  vault_approle: {}
+  # D-45: a local named volume, no NFS/CIFS options, shared by the web and
+  # scheduler services. The label declares the size of the filesystem the
+  # operator provisions for it; the policy test checks
+  # AI_OCR_SPOOL_MAX_BYTES <= that size.
+  ai_spool:
+    driver: local
+    labels:
+      org.m8.ai-spool.size-bytes: "4294967296"
+
+secrets:
+  ai_deployment_id: {file: ./secrets/ai_deployment_id}
+  ai_owner_db_password: {file: ./secrets/ai_owner_db_password}
+  ai_runtime_db_password: {file: ./secrets/ai_runtime_db_password}
+  stack_ca.pem: {file: ./secrets/stack_ca.pem}
+  vault_tls.crt: {file: ./secrets/vault_tls.crt}
+  vault_tls.key: {file: ./secrets/vault_tls.key}
+  ai_fingerprint_key: {file: ./secrets/ai_fingerprint_key}
+  ai_receipt_seed: {file: ./secrets/ai_receipt_seed}
+  ai_service_clients.json: {file: ./secrets/ai_service_clients.json}
+  gateway_secret_key: {file: ./secrets/gateway_secret_key}
+  gateway_access_secret_key: {file: ./secrets/gateway_access_secret_key}
+  gateway_refresh_secret_key: {file: ./secrets/gateway_refresh_secret_key}
+  gateway_private_api_secret: {file: ./secrets/gateway_private_api_secret}
+  event_signing_key: {file: ./secrets/event_signing_key}
+  health_detail_credential: {file: ./secrets/health_detail_credential}
+  metrics_scrape_credential: {file: ./secrets/metrics_scrape_credential}
+  postgres_password: {file: ./secrets/postgres_password}
+  auth_db_password: {file: ./secrets/auth_db_password}
+  redis_password: {file: ./secrets/redis_password}
+  issuer_refresh_secret_key: {file: ./secrets/issuer_refresh_secret_key}
+  issuer_superuser_password: {file: ./secrets/issuer_superuser_password}
+  issuer_private_api_secret: {file: ./secrets/issuer_private_api_secret}
+  issuer_session_secret: {file: ./secrets/issuer_session_secret}
+  issuer_tokens_encryption_key: {file: ./secrets/issuer_tokens_encryption_key}
+  issuer_private_key.pem: {file: ./secrets/issuer_private_key.pem}
+  issuer_public_key.pem: {file: ./secrets/issuer_public_key.pem}
+  traefik_tls.crt: {file: ./secrets/traefik_tls.crt}
+  traefik_tls.key: {file: ./secrets/traefik_tls.key}

@@ -1,0 +1,93 @@
+# Dynamic configuration for every runnable gateway stack (T87, D-21).
+#
+# SECURITY CONTRACT of the public router (websecure):
+#   * /ai/v1/execute and /ai/v1/internal are never routed: V1 has no public
+#     execution surface. Execution is service-only (a service client plus a
+#     signed job context) and arrives on the in-network path.
+#   * /ai/metrics, /ai/docs, /ai/redoc and /ai/openapi.json (and their /ai/v1/
+#     spellings) are never routed: diagnostics stay internal.
+#   * /ai/health is public-shallow; its detail stays gated by the gateway's
+#     HEALTH_DETAIL_CREDENTIAL (fail-closed), not by Traefik.
+#   * X-Internal-Client, X-Internal-Token and X-AI-Job-Context are removed from
+#     every public request. Traefik has no wildcard header removal, so each
+#     name is listed (an empty value deletes the header).
+#   * /user/metrics and /user/private (the issuer's) are never routed.
+# Traefik cleans the request path (sanitizePath, the v3 default) before
+# matching, so "//", "/./" and "/../" spellings of a blocked prefix are matched
+# as the prefix itself. The live suite (T88) proves each row.
+
+tls:
+  options:
+    default:
+      minVersion: VersionTLS12
+      cipherSuites:
+        - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+        - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /run/secrets/traefik_tls.crt
+        keyFile: /run/secrets/traefik_tls.key
+
+http:
+  routers:
+    ai-public:
+      entryPoints: [websecure]
+      rule: >-
+        PathPrefix(`/ai`) && !(
+        PathPrefix(`/ai/v1/execute`) || PathPrefix(`/ai/v1/internal`) ||
+        PathPrefix(`/ai/metrics`) || PathPrefix(`/ai/v1/metrics`) ||
+        PathPrefix(`/ai/docs`) || PathPrefix(`/ai/v1/docs`) ||
+        PathPrefix(`/ai/redoc`) || PathPrefix(`/ai/v1/redoc`) ||
+        PathPrefix(`/ai/openapi.json`) || PathPrefix(`/ai/v1/openapi.json`))
+      service: ai-gateway
+      middlewares: [strip-internal-headers, security-headers]
+      tls: {}
+
+    auth-public:
+      entryPoints: [websecure]
+      rule: >-
+        PathPrefix(`/user`) && !(
+        PathPrefix(`/user/metrics`) || PathPrefix(`/user/private`))
+      service: auth-service
+      middlewares: [strip-internal-headers, security-headers]
+      tls: {}
+
+    ai-internal:
+      entryPoints: [api]
+      rule: PathPrefix(`/ai`)
+      service: ai-gateway
+
+    auth-internal:
+      entryPoints: [api]
+      rule: PathPrefix(`/user`)
+      service: auth-service
+
+  middlewares:
+    strip-internal-headers:
+      headers:
+        customRequestHeaders:
+          X-Internal-Client: ""
+          X-Internal-Token: ""
+          X-AI-Job-Context: ""
+
+    security-headers:
+      headers:
+        frameDeny: true
+        contentTypeNosniff: true
+        referrerPolicy: no-referrer
+        stsSeconds: 31536000
+
+  services:
+    ai-gateway:
+      loadBalancer:
+        servers:
+          - url: http://ai_gateway:8000
+    auth-service:
+      loadBalancer:
+        servers:
+          - url: http://auth_user_service:8000

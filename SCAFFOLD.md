@@ -12,12 +12,18 @@ routes need its reader/writer/admin/superuser authentication.
 
 ## Platform pin
 
-- `fastapi-m8[db,postgres]>=4.5.1,<5.0.0`. The lock is `fastapi-m8==4.5.1`
-  and `auth-sdk-m8==3.2.0`, the current PyPI releases.
-- **Upgrade pending.** The service-client guard and the internal-header
-  re-exports the execution routes need ship in a later additive `fastapi-m8`
-  minor. Once it is published, the floor in `requirements_base.txt` moves to
-  it, with a narrow `pip-compile --upgrade-package fastapi-m8` lock move.
+- `fastapi-m8[db,postgres]>=4.6.0,<5.0.0` and
+  `ai-sdk-m8[jobcontext]>=0.2.0,<0.3.0`. `fastapi-m8` 4.6.0 is the published
+  minor that adds the service-client guard and the internal-header re-exports.
+  `ai-sdk-m8` 0.2.0 carries the signed-object rule, the C-01 schemas and the
+  management wire models.
+- The lock pins `fastapi-m8==4.6.0`, `auth-sdk-m8==3.2.1` (the floor
+  `fastapi-m8` 4.6.0 requires) and `ai-sdk-m8==0.2.0`. All three are on PyPI.
+  The lock moved on 2026-10-20 with one narrow `pip-compile --upgrade-package`
+  for each of the three, under Python 3.14.7 in the Dockerfile's
+  `python:3.14-slim` digest with pip-tools 7.6.2. No other pin changed.
+- The scaffold's earlier pin, until 2026-10-20, was `fastapi-m8==4.5.1` and
+  `auth-sdk-m8==3.2.0`.
 
 ## File mapping
 
@@ -40,7 +46,7 @@ are relative to this repository.
 | `app/deps.py` | `ai_gateway/app/deps.py` | tier re-exports plus `require_job_context`; no API-key or owner-verifier export |
 | `app/routes/__init__.py` | `ai_gateway/app/routes/__init__.py` | docstring |
 | `controllers/__init__.py` | `ai_gateway/controllers/__init__.py` | docstring |
-| `db_models/__init__.py` | `ai_gateway/db_models/__init__.py` | no table yet |
+| `db_models/__init__.py` | `ai_gateway/db_models/__init__.py` | the gateway's own tables (`T16`) |
 | `schemas/__init__.py` | `ai_gateway/schemas/__init__.py` | docstring |
 | `alembic.ini` | `ai_gateway/alembic.ini` | `%(here)s`-relative packaged `alembic/versions`, `version_table = alembic_version_ai` |
 | `alembic/env.py` | `ai_gateway/alembic/env.py` | same offline/online flow and UTC pin; packaged version location |
@@ -49,7 +55,7 @@ are relative to this repository.
 | `Dockerfile` | `ai_gateway/Dockerfile` | same two stages, digest, Debian patch layer and lock install; setuptools/wheel guard and import check as in `media-service-m8`; scripts normalised; build context is the repository root |
 | `scripts/docker_start.sh` | `ai_gateway/scripts/docker_start.sh` | **no autogenerate, no migration**: pre-start checks, then uvicorn |
 | `scripts/pre_start.sh` | `ai_gateway/scripts/pre_start.sh` | **no `alembic upgrade`**: runs `python -m ai_gateway.prestart` (DB wait plus the read-only revision check) |
-| `requirements_base.txt` | `ai_gateway/requirements_base.txt` | `fastapi-m8[db,postgres]` only (PostgreSQL-only); unrelated dependencies dropped |
+| `requirements_base.txt` | `ai_gateway/requirements_base.txt` | `fastapi-m8[db,postgres]` only (PostgreSQL-only); unrelated dependencies dropped; `cryptography` direct since `T22`, `hvac` since `T23` |
 | `requirements_dev.txt` | `ai_gateway/requirements_dev.txt` | `ruff` pinned exactly, `pip-audit` added, build tools dropped |
 | `requirements_prod.txt` | `ai_gateway/requirements_prod.txt` | unchanged |
 | `requirements_prod.lock` | `ai_gateway/requirements_prod.lock` | regenerated from the gateway's own requirements (Python 3.14, Linux, PyPI only) |
@@ -76,8 +82,8 @@ are relative to this repository.
 
 | File | Purpose |
 | --- | --- |
-| `ai_gateway/core/execution_guard.py` | mandatory job-context dependency and the execution-router factory; fails closed |
-| `ai_gateway/app/routes/execution.py`, `management.py` | the two routers, with no route yet |
+| `ai_gateway/core/execution_guard.py` | mandatory service-client and job-context dependency and the execution-router factory; verifies since `T17` (`core/job_context.py`) |
+| `ai_gateway/app/routes/execution.py`, `management.py` | the two routers; management serves `admin.py` and `profiles.py` since `T18` |
 | `ai_gateway/prestart.py` | DB wait and the read-only `alembic_version_ai` check |
 | `ai_gateway/scheduler.py`, `scripts/scheduler_start.sh` | scheduler run-mode; refuses to run until a job exists |
 | `ai_gateway/scripts/ai_migrate.sh` | the `ai-migrate` one-shot, the only Alembic caller |
