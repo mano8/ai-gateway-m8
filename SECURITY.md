@@ -1395,10 +1395,13 @@ gateway has no recovery path by design.
   its KEK is a full credential disclosure.
 - Restore-test the KEK backup at each rotation, together with a database
   backup it must open.
-- If a KEK is lost anyway: deploy a new KEK, and every scope owner
-  re-enters each affected credential. Replicas refuse to start while rows
-  still need the lost generation; delete the affected credentials (their
-  material is unreadable) before starting them.
+- If a KEK is lost anyway, restore it from that backup. This build has
+  **no supported recovery without it**: every web and scheduler replica
+  refuses to start while a row still holds material under the lost
+  generation, and deleting a credential does not clear its material (the
+  delete is logical, D-43), so nothing can run to remove those rows. A
+  recovery command that destroys unreadable material, after which owners
+  re-enter their keys, is not shipped.
 - With `vault_transit` the same holds for the transit key inside Vault: its
   loss, or a Vault restore that lost versions, loses the credentials it
   wrapped.
