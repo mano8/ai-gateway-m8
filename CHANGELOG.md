@@ -242,6 +242,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   transitions (`ArtifactScheduler`) under the recorded credential version
   only; `ai_remote_artifacts{status}`; `python -m ai_gateway.execution
   remote-artifact accept-residual`.
+- `SECURITY.md` is the completed threat model (`T34`): assets, trust
+  boundaries, a threat table (compromised worker, stolen Redis job, `ai_db`
+  dump, leaked configuration, Vault outage, malicious provider, document
+  and superuser input, a second replica, gateway compromise, binding
+  repoint), the stated residuals, the ASVS 5.0 and LLM Top 10 maps, and the
+  key-generation, rotation, KEK backup and loss, restore, remote-artifact,
+  spool-repair, offboarding and audit-prune runbooks. Every control cites
+  its tests; `tests/test_security_doc.py` fails on a citation that names no
+  test and on a control section that cites none and names no other proof.
 
 ### Changed
 

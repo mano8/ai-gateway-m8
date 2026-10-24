@@ -484,6 +484,7 @@ published by `.github/workflows/docker-publish.yaml` on a published GitHub
 release only (multi-arch, Trivy-gated, SPDX SBOM, keyless cosign signature,
 build provenance).
 
-See [`SECURITY.md`](SECURITY.md) for the threat model and how to report a
-vulnerability, and [`SCAFFOLD.md`](SCAFFOLD.md) for the template this service
+See [`SECURITY.md`](SECURITY.md) for the threat model, the supported
+topology, the security runbooks (key generation and rotation, KEK backup
+and loss, restore, offboarding) and how to report a vulnerability, and [`SCAFFOLD.md`](SCAFFOLD.md) for the template this service
 was adapted from.
