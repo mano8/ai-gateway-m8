@@ -238,6 +238,37 @@ database bootstrap must create beforehand.
 The image runs as `appuser`, carries no pip, and supports a read-only root
 filesystem.
 
+### The scheduler (D-42)
+
+`scheduler_start.sh` exports `AI_RUN_MODE=scheduler` and runs
+`python -m ai_gateway.scheduler`, which repeats the start-up checks above and
+then runs every scheduled job under a fenced database lease. The same
+`env_file` as the web service is used; the scheduler needs the KEK (or the
+Vault credentials) and the `ai_runtime` password, and **neither requires nor
+reads** the fingerprint key or the OCR receipt seed, so mount those on the
+web service only. Any number of replicas is safe: each job runs once per
+interval across them.
+
+| Job | Every | Work |
+| --- | --- | --- |
+| `settlement` | 15 s | `pending`, `dispatching`, `receiving` and `spooled` past their deadlines |
+| `contexts` | 60 s | job-context rows past `exp` |
+| `spool` | 30 s | spool cleanup, restore-mode release, orphans, the high-water write (only with `AI_OCR_SPOOL_DIR`) |
+| `remote_artifacts` | 30 s | provider-file transitions, deletion, listings, the platform sweep |
+| `restore` | 30 s | the `restore-reconcile` steps |
+| `rate_windows` | 5 min | rate-window rows older than two windows |
+| `occupancy` | 5 min | in-flight counters recounted under the counter row's lock |
+| `model_digests` | 15 min | Ollama digest re-check |
+| `credentials` | 1 h | material destruction of retired, unreferenced versions |
+| `retention` | 1 h | execution and usage retention, audit table sizes |
+
+`python -m ai_gateway.scheduler --healthcheck` is the container probe: it
+exits `0` while the loop's heartbeat file (in the container's tmpfs) is
+younger than two minutes. The web `/health` reports each job's last
+successful run age under `scheduler` and is degraded while any job has never
+succeeded or is older than three intervals (at least its interval plus the
+lease and a minute).
+
 ## Configuration
 
 Copy `ai_gateway/.env.example` to `ai_gateway/.env` and replace every
@@ -386,6 +417,32 @@ python -m ai_gateway.execution spool repair \
 
 The release is audited (`spool.repair`), and the next orphan pass removes the
 data file.
+
+## After an `ai_db` restore
+
+Stop every gateway and scheduler process first. With a spool configured, the
+scheduler keeps a high-water mark of the database in
+`/spool/.state/db-highwater`; a process whose database is behind it refuses
+execution with `503 restore_detected`. Then:
+
+```bash
+python -m ai_gateway.restore reconcile     # the fail-closed reset
+python -m ai_gateway.restore status        # the steps the scheduler took
+python -m ai_gateway.restore ratify --evidence "<ticket or note>"
+```
+
+`reconcile` disables every provider, sets every active credential
+`reconfirm_required`, resets every `fall_through` binding to `fail`, holds
+execution for the job-context TTL plus skew and holds the daily budget until
+the next UTC day. Start the scheduler: it records replay safety once the hold
+passed, releases spools cleaned after the snapshot point (audited as restore
+artifacts), records the residual risk for provider files the restored
+database never knew, and writes the security report. `ratify` refuses until
+all three are done; it resumes execution and re-baselines the high-water.
+Providers and credentials stay off until re-enabled and re-confirmed one by
+one; budgeted admissions answer `quota_exceeded` until the hold's day ends.
+`reconcile --vault` (a Vault-side restore) exits `2`: the `vault` KV backend
+is not served by this build.
 
 ## Retention, reconciliation and audit pruning
 

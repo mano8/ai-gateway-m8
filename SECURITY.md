@@ -431,6 +431,46 @@ cannot learn that another tenant exists. The runtime role cannot delete audit
 rows; `audit-prune` runs as the schema owner, writes its own summary row
 first and refuses a future cut-off.
 
+### Scheduler lease and fencing (T33a, D-42)
+
+Scheduled work runs under one database lease per job. A lease is taken only
+once expired, with a fresh random 128-bit token, and every job statement
+asserts the epoch, the token and an unexpired lease on the lease row, read
+`FOR SHARE` so a successor's acquisition and a stale statement cannot both
+commit. A leader paused past its lease and resumed, or one that survived an
+`ai_db` restore that rewound the epoch, therefore commits nothing. Remote
+artifacts are claimed per row before any provider call, and every later
+change asserts the claim and the lease. What this proves is stated exactly:
+database transitions happen at most once; external effects (a provider
+deletion, a spool unlink) may repeat, and none counts as complete by its own
+repetition: a deletion counts only on the adapter's documented proof (a
+`404` is not one for Mistral), an unlink only under the D-45 lock.
+
+The scheduler sits inside the credential trust boundary (it resolves the
+recorded version to delete provider files and re-checks Ollama digests), but
+runs without the fingerprint key and the OCR receipt seed, which it never
+uses. The occupancy repair recounts under the counter row's lock with a
+fresh statement, so a concurrent admission or settlement is never lost.
+Material destruction clears a retired version only once no artifact row of
+any status references it, its sweep obligation is discharged, it is no live
+credential's current version and no execution in flight resolved it; the
+schema trigger re-checks the first conditions.
+
+### Restore (T33a)
+
+A snapshot restore rewinds `ai_db_epoch` but not the spool volume, so a
+database behind the spool's high-water refuses execution until ratified.
+`restore reconcile` fails closed: every provider disabled, every active
+credential held for re-confirmation by its owner, every `fall_through`
+binding back to `fail`, execution held for the job-context TTL plus skew (a
+context minted before the restore cannot be replayed against the rewound
+redemption table), and the budget held until the next UTC day (the restored
+usage rows undercount; V1 offers no reconstruction). Ratification reads only
+the database; the log-sink audit stream and `/spool/.state/restore-events`
+are evidence, not authority. On the database backends, provider files
+created under a version the restored database never saw are beyond reach;
+the residual is recorded and bounded only by provider-side expiry.
+
 ### Credential validation (T25)
 
 `:validate` sends one minimal authenticated request with the credential's

@@ -199,6 +199,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (audited). `GET {API_PREFIX}/v1/usage` for tenant admins and the
   superuser (aggregates only). `python -m ai_gateway.audit_prune --before
   <date> --operator <name>`, owner role only, writes its own summary row.
+- The scheduler run-mode (`T33a`, D-42, `python -m ai_gateway.scheduler`):
+  one `ai_scheduler_lease` row per job, acquired with a fresh 128-bit token
+  and `epoch + 1` only once expired, renewed only while held; every job's
+  statements carry the fence (`epoch`, `holder_token`, `lease_until > now()`,
+  read `FOR SHARE`), and the remote-artifact jobs that reach a provider take
+  per-item claims (`claim_epoch`, `claim_holder_token`, `claim_until`). Each
+  job runs once per interval across replicas (`last_success_at`, stamped
+  under the fence). Jobs: settlement, context sweep, spool (D-45 cleaner,
+  restore-mode release, orphans, the restore high-water), remote artifacts
+  (D-43 (c)–(k), the platform sweep, the gauge), restore steps, rate-window
+  pruning, the locked occupancy-counter repair, the Ollama digest re-check,
+  material destruction of retired credential versions (audited
+  `credential.material_destroyed`) and retention. `--healthcheck` reads a
+  heartbeat file; `/health` gains a `scheduler` check that degrades when a
+  job never succeeded or is late. The scheduler runs the web run-mode's
+  start-up checks first, as `AI_RUN_MODE=scheduler`, which neither requires
+  nor reads the fingerprint key or the OCR receipt seed.
+- Restore detection and reconciliation (`T33a`): the scheduler writes
+  `nextval('ai_db_epoch')` to `/spool/.state/db-highwater`; a database behind
+  it refuses execution with `503 restore_detected` (route guard and
+  reservation). `python -m ai_gateway.restore reconcile` enters the state
+  machine with the fail-closed reset (every provider disabled, every active
+  credential `reconfirm_required`, every `fall_through` binding `fail`), a
+  replay hold of the context TTL plus skew and a budget hold until the next
+  UTC day; the scheduler takes replay safety, external reconciliation (spool
+  restore mode, the provider-file residual entry) and the security report in
+  order; `ratify --evidence` resumes execution and re-baselines the
+  high-water. Every step is audited; entry and ratification also go to
+  `/spool/.state/restore-events`.
+- `ai_scheduler_lease.last_success_at` (`0001_initial`, unreleased).
 - `ai_execution.ocr_options` and `expected_execution_identity`, recorded at
   `spooled` and frozen after `receiving` (`0001_initial`, unreleased).
 - `OcrJob` and the `:dispatch` reservation: `spooled → pending` under the
@@ -227,7 +257,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `cryptography>=48.0.1` is a direct requirement (the envelope uses it); the
   lock is unchanged except for that annotation.
 - A deployment configured for the `vault` KV backend refuses to start until
-  that store lands (`T24`).
+  that store lands (`T24`); `restore reconcile --vault` exits `2` for the
+  same reason.
+- `ai_gateway/scheduler.py`, which refused to run, is now the
+  `ai_gateway.scheduler` package; the command is unchanged.
 - `hvac>=2.3.0` is a direct requirement. The lock adds `hvac` 2.4.0,
   `requests` 2.34.2, `urllib3` 2.8.0 and `charset-normalizer` 3.5.2, and
   moves `certifi` 2026.7.22 → 2026.10.19 (PYSEC-2026-4320) with a narrow
