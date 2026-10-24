@@ -1,0 +1,4 @@
+# Runtime env files and every generated secret — never commit.
+*.env
+!*.env.example
+secrets/
