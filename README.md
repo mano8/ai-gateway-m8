@@ -479,10 +479,26 @@ passes the threshold the operator sets for the deployment.
 
 ## Deployment
 
-Compose stacks will live under `docker_compose/`; none ships yet. Images are
-published by `.github/workflows/docker-publish.yaml` on a published GitHub
-release only (multi-arch, Trivy-gated, SPDX SBOM, keyless cosign signature,
-build provenance).
+Gateway-only compose stacks live under [`docker_compose/`](docker_compose/):
+
+| Stack | Backend | Posture |
+| --- | --- | --- |
+| `postgres_m8` | `database`, local KEK | development |
+| `encrypted_db_m8` | `database`, local KEK; optional local Ollama | production, strict |
+| `vault_transit_m8` | `database`, `vault_transit` KEK (learning Vault) | production, strict |
+| `vault_kv_m8` | `vault` KV (learning Vault); not bootable until the KV store is served | production, strict |
+| `vault_prod_template` | external production Vault | reference template |
+
+Each runnable stack builds the image from this repository and starts with
+`bash init.sh && docker compose up -d`. `init.sh` generates every missing
+secret once, `AI_DEPLOYMENT_ID` included, and never overwrites one.
+`tests/test_compose_policy.py` holds every stack to the container, secret,
+spool and configuration rules, and to the ratified first-deployment values.
+The [stack index](docker_compose/README.md) has the details.
+
+Images are published by `.github/workflows/docker-publish.yaml` on a published
+GitHub release only (multi-arch, Trivy-gated, SPDX SBOM, keyless cosign
+signature, build provenance).
 
 See [`SECURITY.md`](SECURITY.md) for the threat model, the supported
 topology, the security runbooks (key generation and rotation, KEK backup

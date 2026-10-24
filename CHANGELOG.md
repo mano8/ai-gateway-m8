@@ -8,6 +8,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Deployment examples (`T87`): gateway-only compose stacks under
+  `docker_compose/`.
+  - **The stacks.** `postgres_m8` (development), `encrypted_db_m8`
+    (production; `database` backend, local KEK, optional local Ollama on
+    `ai_net`), `vault_transit_m8` (production; `vault_transit` KEK on a
+    learning-only TLS Vault with an AppRole), `vault_kv_m8` (the `vault` KV
+    backend; not bootable until that store is served) and the
+    `vault_prod_template` reference for an external Vault.
+  - **What each runnable stack runs.** The web service, `ai_gateway_scheduler`
+    and the `ai-migrate` one-shot built from this repository, their own
+    PostgreSQL, the issuer as one `PRIVATE_API_CONSUMERS` row, and a Traefik
+    front. Traefik blocks the execution, internal and diagnostic prefixes and
+    strips the internal headers.
+  - **`init.sh`.** It generates every missing secret once, inside the gateway
+    image, with no network: `AI_DEPLOYMENT_ID` (never regenerated), the keys,
+    the receipt seed, the test issuer, the service clients, the database roles'
+    passwords and the TLS material.
+  - **The policy test.** `tests/test_compose_policy.py` asserts the hardening,
+    the per-service secret list of D-42, the `ai_spool` volume and its sizing
+    rule, Alembic only in `ai-migrate`, the ratified first-deployment values
+    and self-containment.
+  - **The live check.** `tests/live/test_vault_transit_stack.py` runs the
+    `vault_transit` KEK against a running `vault_transit_m8`.
+  - **Test-only dependency.** `PyYAML` joins `requirements_dev.txt`.
 - Settings (`T15`): every C-14 key typed, with defaults for the technical
   bounds, and boot refusals for every contradiction the settings can see —
   backend and KEK combinations, unsafe or reused key files, placeholders,
