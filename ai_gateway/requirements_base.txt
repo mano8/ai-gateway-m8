@@ -5,7 +5,7 @@
 # the internal-header re-exports the gateway's execution routes need ship in a
 # later additive fastapi-m8 minor; the floor moves to it, with a narrow
 # `pip-compile --upgrade-package fastapi-m8` lock move, once it is published.
-fastapi-m8[db,postgres]>=4.5.1,<5.0.0
+fastapi-m8[db,postgres]>=4.6.0,<5.0.0
 uvicorn>=0.52.1
 
 alembic>=1.18.4
